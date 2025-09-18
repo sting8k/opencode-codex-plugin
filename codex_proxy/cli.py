@@ -55,12 +55,18 @@ def _log_configuration(settings: ProxySettings) -> None:
     """Emit a concise summary of the active configuration values."""
 
     debug_display = settings.debug_sse_path if settings.debug_sse_enabled else "disabled"
+    try:
+        resolved_auth_path = settings.resolved_auth_path()
+        auth_display = str(resolved_auth_path)
+    except ValueError:
+        auth_display = settings.auth_path
+
     logger.info("Initializing Codex OpenAI Proxy ...")
     logger.info(
         "✓ Loaded configuration host=%s port=%s auth_path=%s debug=%s",
         settings.host,
         settings.port,
-        settings.auth_path,
+        auth_display,
         debug_display,
     )
 

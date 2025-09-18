@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 from typing import Any, List, Optional
-
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class ChatMessage(BaseModel):
@@ -12,6 +11,7 @@ class ChatMessage(BaseModel):
 
 
 class ChatCompletionsRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
     model: str
     messages: List[ChatMessage]
     temperature: Optional[float] = None
@@ -19,10 +19,6 @@ class ChatCompletionsRequest(BaseModel):
     stream: Optional[bool] = None
     tools: Optional[List[Any]] = None
     tool_choice: Optional[Any] = Field(default=None, alias="tool_choice")
-
-    class Config:
-        allow_population_by_field_name = True
-        extra = "allow"
 
 
 class ToolCallFunction(BaseModel):

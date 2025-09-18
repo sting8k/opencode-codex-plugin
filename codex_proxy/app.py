@@ -85,7 +85,7 @@ def create_app(settings: ProxySettings | None = None) -> FastAPI:
         auth_path = settings.resolved_auth_path()
         app.state.auth_data = await _read_auth_file(auth_path)
         if app.state.auth_data:
-            logger.info("Loaded authentication data from %s", auth_path)
+            logger.info("✓ Loaded authentication data from %s", auth_path)
 
     @app.on_event("shutdown")
     async def on_shutdown() -> None:  # pragma: no cover - exercised at runtime
