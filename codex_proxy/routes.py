@@ -6,6 +6,7 @@ SSE debug logging for upstream responses.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging, traceback
 import re
@@ -599,7 +600,7 @@ async def chat_completions(request: Request, payload: ChatCompletionsRequest) ->
         try:
             if client is None:
                 import aiohttp
-                async with aiohttp.ClientSession() as s:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=None, sock_read=None)) as s:
                     async with s.post(CHATGPT_RESPONSES_URL, json=upstream_payload, headers=headers) as r:
                         if debug_cb:
                             debug_cb(f"upstream status: {r.status}")
@@ -636,6 +637,13 @@ async def chat_completions(request: Request, payload: ChatCompletionsRequest) ->
                     async for out in _translate_sse(stream_iter, state, debug_cb):
                         yield out
 
+        except asyncio.TimeoutError as exc:
+            logger.error("Streaming timeout: %s", exc)
+            if debug_cb:
+                debug_cb("streaming timeout: upstream stalled")
+                debug_cb(traceback.format_exc())
+            for chunk in state.iter_content_chunks("Error: Upstream timed out while streaming", finish="stop"):
+                yield chunk
         except Exception as exc:  # noqa: BLE001
             logger.error("Streaming error: %s", exc)
             if debug_cb:
@@ -659,7 +667,7 @@ async def chat_completions(request: Request, payload: ChatCompletionsRequest) ->
     try:
         if client is None:
             import aiohttp
-            async with aiohttp.ClientSession() as s:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=None, sock_read=None)) as s:
                 async with s.post(CHATGPT_RESPONSES_URL, json=upstream_payload, headers=headers) as r:
                     if debug_cb:
                         debug_cb(f"upstream status: {r.status}")
