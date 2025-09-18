@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codex-proxy"
+version = "0.1.0"
+description = "FastAPI proxy translating OpenAI Chat Completions into ChatGPT-style SSE responses."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Codex Proxy Maintainers" }
+]
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.23",
+    "aiohttp>=3.9",
+    "pydantic>=2.2",
+]
+
+[project.scripts]
+codex-proxy = "codex_proxy.cli:run"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["codex_proxy*"]
+
+[tool.setuptools.package-data]
+codex_proxy = ["prompt.md"]

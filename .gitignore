@@ -1,0 +1,72 @@
+# =====================
+# Node / TypeScript
+# =====================
+node_modules/
+dist/
+build/
+tmp/
+.tmp/
+.tmp-*/
+*.tsbuildinfo
+.eslintcache
+.turbo/
+
+# Package manager logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# =====================
+# Python (codex_proxy)
+# =====================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.py,cover
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage/
+htmlcov/
+*.egg-info
+
+# Virtual environments
+.venv/
+venv/
+env/
+.envrc
+
+# =====================
+# Environment / secrets
+# =====================
+.env
+.env.*
+
+# =====================
+# Logs & runtime data
+# =====================
+*.log
+*.pid
+*.pid.lock
+
+# =====================
+# OS / Editor metadata
+# =====================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# =====================
+# Backups & archives
+# =====================
+*.bak
+*.tmp
+*.orig
+*.zip
+.serena
+agents.md
