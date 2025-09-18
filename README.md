@@ -11,20 +11,21 @@ It consists of two main parts:
 ## Installation Guide
 
 ### 1. Quick install codex-proxy as a cli tool
-### Step 1: Install the Proxy Server
-
-```bash
-uvx --from git+https://github.com/sting8k/opencode-codex-plugin.git codex-proxy
-```
-This command will install `codex-proxy` into your virtual environment.
-
-### Step 2: Get Codex Credentials
+### Step 1: Get Codex Credentials
 
 The proxy needs an `auth.json` file to authenticate with Codex services.
 
 1.  Sign in to Codex using either the Codex VS Code Extension or the Codex CLI.
 2.  This action will generate an `auth.json` file. By default, the proxy looks for this file at `~/.codex/auth.json`.
 3.  If your file is in a different location, you can specify the path when running the proxy (see Usage section).
+
+### Step 2: Run the Proxy Server
+
+```bash
+uvx --from git+https://github.com/sting8k/opencode-codex-plugin.git codex-proxy
+```
+This command will install `codex-proxy` into your virtual environment.
+
 
 ### Step 3: Install the OpenCode Plugin
 
@@ -46,9 +47,9 @@ New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.config\opencode\plu
 
 ### 1. Run the Proxy
 
-Start the proxy server from your terminal:
+Start the proxy server from your terminal (Same as step 2 above):
 ```bash
-codex-proxy
+uvx --from git+https://github.com/sting8k/opencode-codex-plugin.git codex-proxy
 ```
 
 You will see output similar to this, indicating the server is running:
