@@ -7,7 +7,7 @@ SSE debug logging for upstream responses.
 from __future__ import annotations
 
 import json
-import logging
+import logging, traceback
 import re
 import time
 import uuid
@@ -94,6 +94,17 @@ def _flatten_content(c: Any) -> str:
         return " ".join(parts)
     return json.dumps(c, separators=(",", ":"))
 
+def _extract_upstream_error(body: str) -> str:
+    try:
+        data = json.loads(body)
+        err = data.get("error", {})
+        msg = err.get("message")
+        reset = err.get("resets_in_seconds")
+        if reset is not None:
+            return f"{msg or 'Upstream error'} (resets in {reset} seconds)"
+        return msg or "Upstream error"
+    except json.JSONDecodeError:
+        return "Upstream error"
 
 def _sanitize_tools(tools: Any) -> list[dict[str, Any]]:
     if not isinstance(tools, list):
@@ -267,7 +278,7 @@ def _make_debugger(request: Request) -> Optional[Callable[[str], None]]:
 # ---------- SSE translation ----------
 
 class _StreamState:
-    _SSE_EVENT_LIMIT_BYTES = 8 * 1024
+    _SSE_EVENT_LIMIT_BYTES = 4 * 1024
     _DELTA_BUDGET_BYTES = _SSE_EVENT_LIMIT_BYTES - 512  # leave room for JSON envelope overhead
 
     def __init__(self, response_id: str, model: str) -> None:
@@ -276,6 +287,8 @@ class _StreamState:
         self.created = int(time.time())
         self.think_open = False
         self.tool_map: dict[str, dict[str, Any]] = {}
+        self.args_buf: dict[str, str] = {}
+        self.tool_order: list[str] = []
         self.args_buf: dict[str, str] = {}
         self.tool_order: list[str] = []
 
@@ -381,6 +394,30 @@ class _StreamState:
         self.think_open = False
         # Ensure a trailing newline after closing think block for better UI formatting
         return self.iter_content_chunks("</think>\r\n")
+
+
+async def _iter_sse_lines(byte_iter: AsyncIterator[bytes], *, max_buffer_bytes: int = 2 * 1024 * 1024) -> AsyncIterator[bytes]:
+    """Yield SSE lines without relying on upstream readline limits."""
+    buffer = bytearray()
+
+    async for chunk in byte_iter:
+        if not chunk:
+            continue
+        buffer.extend(chunk)
+        while True:
+            newline_idx = buffer.find(b"\n")
+            if newline_idx == -1:
+                break
+            line = bytes(buffer[: newline_idx + 1])
+            yield line
+            del buffer[: newline_idx + 1]
+        if len(buffer) > max_buffer_bytes:
+            # Safeguard against runaways when upstream omits newlines.
+            yield bytes(buffer)
+            buffer.clear()
+
+    if buffer:
+        yield bytes(buffer)
 
 
 async def _translate_sse(upstream_iter: AsyncIterator[bytes], state: _StreamState, debug: Optional[Callable[[str], None]]):
@@ -567,15 +604,16 @@ async def chat_completions(request: Request, payload: ChatCompletionsRequest) ->
                         if debug_cb:
                             debug_cb(f"upstream status: {r.status}")
                         if r.status >= 400:
-                            txt = await r.text()
+                            body = await r.text()
                             if debug_cb:
-                                debug_cb(f"upstream error body: {txt[:500]}")
-                            for chunk in state.iter_content_chunks(f"Error: Upstream {r.status}"):
+                                debug_cb(f"upstream error body: {body[:500]}")
+                            detail = _extract_upstream_error(body) or f"Upstream {r.status}"
+                            for chunk in state.iter_content_chunks(f"Error: {detail}", finish="stop"):
                                 yield chunk
                             yield "data: [DONE]\n\n"
                             return
                         # async for out in _translate_sse(r.content, state, debug_cb):
-                        stream_iter = r.content.iter_any()
+                        stream_iter = _iter_sse_lines(r.content.iter_chunked(1024))
                         async for out in _translate_sse(stream_iter, state, debug_cb):
                             yield out
             else:
@@ -583,19 +621,27 @@ async def chat_completions(request: Request, payload: ChatCompletionsRequest) ->
                     if debug_cb:
                         debug_cb(f"upstream status: {r.status}")
                     if r.status >= 400:
-                        txt = await r.text()
+                        body = await r.text()
                         if debug_cb:
-                            debug_cb(f"upstream error body: {txt[:500]}")
-                        for chunk in state.iter_content_chunks(f"Error: Upstream {r.status}"):
+                            debug_cb(f"upstream error body: {body[:500]}")
+                        detail = _extract_upstream_error(body) or f"Upstream {r.status}"
+                        for chunk in state.iter_content_chunks(f"Error: {detail}", finish="stop"):
                             yield chunk
                         yield "data: [DONE]\n\n"
                         return
-                    async for out in _translate_sse(r.content, state, debug_cb):
+                    if hasattr(r, "aiter_raw"):
+                        stream_iter = _iter_sse_lines(r.aiter_raw())
+                    else:
+                        stream_iter = _iter_sse_lines(r.content.iter_chunked(1024))
+                    async for out in _translate_sse(stream_iter, state, debug_cb):
                         yield out
+
         except Exception as exc:  # noqa: BLE001
             logger.error("Streaming error: %s", exc)
             if debug_cb:
                 debug_cb(f"streaming exception: {exc}")
+                debug_cb(f"streaming exception class: {exc.__class__.__name__}")
+                debug_cb(traceback.format_exc())
             for chunk in state.iter_content_chunks(f"Streaming error: {exc}", finish="stop"):
                 yield chunk
         yield "data: [DONE]\n\n"
@@ -621,7 +667,8 @@ async def chat_completions(request: Request, payload: ChatCompletionsRequest) ->
                         body = await r.text()
                         if debug_cb:
                             debug_cb(f"upstream error body: {body[:500]}")
-                        raise ClientError(f"Upstream {r.status}: {body[:200]}")
+                        detail = _extract_upstream_error(body) or f"Upstream {r.status}"
+                        raise ClientError(detail)
                     async for raw in r.content:
                         line = raw.decode("utf-8", errors="ignore").rstrip("\r\n")
                         if debug_cb:

@@ -24,8 +24,6 @@ The proxy needs an `auth.json` file to authenticate with Codex services.
 ```bash
 uvx --from git+https://github.com/sting8k/opencode-codex-plugin.git codex-proxy
 ```
-This command will install `codex-proxy` into your virtual environment.
-
 
 ### Step 3: Install the OpenCode Plugin
 
