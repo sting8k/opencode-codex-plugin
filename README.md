@@ -2,17 +2,23 @@
 
 An OpenCode plugin that wires the ChatGPT provider to a Codex-compatible proxy.
 
+## Requirements
+
+- Python 3.10 or newer
+
 ## Installation
 
 ```bash
-mv plugin_codexproxy.ts ~/.config/opencode/plugin/
+git clone https://github.com/sting8k/opencode-codex-plugin
+cd opencode-codex-plugin
+cp plugin_codexproxy.ts ~/.config/opencode/plugin/
 pip3 install .
 ```
 
 This exposes the `codex-proxy` CLI and Install plugin for opencode.
 
 ### Usage
-1. Sign in to Codex via OAuth using the Codex VSCode Extension or the Codex-CLI to generate auth.json.
+1. Sign in to Codex via OAuth using the [Codex VS Code Extension](https://marketplace.visualstudio.com/items?itemName=openai.chatgpt) or the [Codex CLI](https://github.com/openai/codex) to generate auth.json.
 
 2. Quick run:
 ```bash
