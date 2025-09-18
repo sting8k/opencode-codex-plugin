@@ -48,9 +48,6 @@ _MODEL_ALIAS = {
     "codex-mini-latest": "codex-mini-latest",
 }
 
-# Default instructions
-_DEFAULT_INSTRUCTIONS = (Path(__file__).parent / "prompt.md").read_text()
-
 # Fixed models payload (unchanged IDs)
 MODELS_PAYLOAD = ModelsList(
     data=[
@@ -67,6 +64,18 @@ MODELS_PAYLOAD = ModelsList(
 )
 
 # ---------- Helpers ----------
+
+def _load_default_instructions() -> str:
+    prompt_path = Path(__file__).parent / "prompt.md"
+    try:
+        return prompt_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(
+            f"Failed to read prompt instructions at {prompt_path}: {exc}"
+        ) from exc
+
+
+_DEFAULT_INSTRUCTIONS = _load_default_instructions()
 
 
 def _normalize_model(model: str | None) -> tuple[str, dict[str, str] | None]:

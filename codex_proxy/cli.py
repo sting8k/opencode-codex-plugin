@@ -1,6 +1,6 @@
 """Entry points for launching the FastAPI proxy via uvicorn."""
 from __future__ import annotations
-
+from .app import AuthConfigError, _read_auth_file, create_app
 import argparse
 import asyncio
 import logging
@@ -17,7 +17,7 @@ DEFAULT_PORT = 8111
 DEFAULT_DEBUG_PATH = "/tmp/debug_codexproxy.log"
 DEFAULT_AUTH_PATH = "~/.codex/auth.json"
 if os.name == "nt":
-    DEFAULT_AUTH_PATH = r"%USERPROFILE%\\.config\\opencode\\opencode.json"
+    DEFAULT_AUTH_PATH = r"%USERPROFILE%\\.codex\\auth.json"
 
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -96,6 +96,15 @@ def parse_args() -> argparse.Namespace:
 def run() -> None:
     args = parse_args()
     settings = _build_settings(args)
+    
+    try:
+        auth_path = settings.resolved_auth_path()
+        # Validate auth config before creating the app so Uvicorn stays quiet.
+        asyncio.run(_read_auth_file(auth_path))
+    except AuthConfigError as err:
+        logger.error("[!] Auth configuration error: %s", err)
+        raise SystemExit(1)
+    
     _log_configuration(settings)
 
     uvicorn.run(

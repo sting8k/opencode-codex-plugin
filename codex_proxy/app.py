@@ -15,20 +15,46 @@ from .routes import router
 
 logger = logging.getLogger(__name__)
 
+class AuthConfigError(RuntimeError):
+    """Raised when the auth.json file is missing or invalid."""
 
-async def _read_auth_file(path: Path) -> Optional[dict[str, Any]]:
+async def _read_auth_file(path: Path) -> dict[str, Any]:
     if not path.exists():
-        logger.warning("Auth file %s does not exist; proceeding without credentials", path)
-        return None
+        raise AuthConfigError(f"Auth file {path} does not exist; supply --auth-path")
 
     try:
         content = await asyncio.to_thread(path.read_text)
-        return json.loads(content)
-    except json.JSONDecodeError as exc:
-        logger.error("Failed to parse auth file %s: %s", path, exc)
     except OSError as exc:
-        logger.error("Failed to read auth file %s: %s", path, exc)
-    return None
+        raise AuthConfigError(f"Failed to read auth file {path}: {exc}") from exc
+
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise AuthConfigError(f"Auth file {path} is not valid JSON: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise AuthConfigError(f"Auth file {path} must contain a JSON object")
+
+    tokens_raw = data.get("tokens")
+    if tokens_raw is None:
+        tokens: dict[str, Any] = {}
+    elif isinstance(tokens_raw, dict):
+        tokens = tokens_raw
+    else:
+        raise AuthConfigError(
+            f"Auth file {path} needs 'tokens' to be an object when present"
+        )
+
+    access_token = tokens.get("access_token")
+    api_key = data.get("OPENAI_API_KEY") or data.get("api_key")
+    if not access_token and not api_key:
+        raise AuthConfigError(
+            f"Auth file {path} must include tokens.access_token or OPENAI_API_KEY/api_key"
+        )
+
+    normalized = dict(data)
+    normalized["tokens"] = tokens
+    return normalized
 
 
 def create_app(settings: ProxySettings | None = None) -> FastAPI:
@@ -39,7 +65,7 @@ def create_app(settings: ProxySettings | None = None) -> FastAPI:
     app = FastAPI(
         title="Codex OpenAI Proxy",
         description="FastAPI port of the Rust warp Codex proxy for OpenAI-compatible endpoints.",
-        version="0.1.0",
+        version="0.1.3",
     )
 
     app.include_router(router)
