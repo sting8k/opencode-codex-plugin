@@ -65,7 +65,7 @@ def create_app(settings: ProxySettings | None = None) -> FastAPI:
     app = FastAPI(
         title="Codex OpenAI Proxy",
         description="FastAPI port of the Rust warp Codex proxy for OpenAI-compatible endpoints.",
-        version="0.1.3",
+        version="0.1.4",
     )
 
     app.include_router(router)
