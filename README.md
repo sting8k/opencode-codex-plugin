@@ -10,8 +10,8 @@ A lightweight OpenCode plugin that wires the ChatGPT provider to a Codex-compati
 mv plugin_codexproxy.ts ~/.config/opencode/plugin/
 ```
 
-2. Ensure the proxy is running at `http://127.0.0.1:8111/v1/` or set `CHATGPT_CODEX_PROXY_BASE_URL` to your endpoint.
-**You can use [ChatMock](https://github.com/RayBytes/ChatMock) as a drop-in Codex-compatible proxy endpoint.**
+2. Ensure the proxy is running at `http://127.0.0.1:8111/v1/` or set `CHATGPT_CODEX_PROXY_BASE_URL` to your endpoint.  
+*You can use [ChatMock](https://github.com/RayBytes/ChatMock) as a drop-in Codex-compatible proxy endpoint.*
 
 3. The provider will register itself during startup.
 
