@@ -47,3 +47,9 @@ To remove the package from your environment:
 rm -f ~/.config/opencode/plugin/plugin_codexproxy.ts
 pip3 uninstall codex-proxy
 ```
+
+## References
+
+- [ChatMock](https://github.com/RayBytes/ChatMock) — Codex-compatible mock proxy you can run while configuring the local service.
+- [just-every/code](https://github.com/just-every/code) — Reference implementation of Codex tooling that inspired this proxy integration.
+
