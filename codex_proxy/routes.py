@@ -301,6 +301,7 @@ class _StreamState:
         self.tool_order: list[str] = []
         self.args_buf: dict[str, str] = {}
         self.tool_order: list[str] = []
+        self.summary_active = False
 
     def _format_event(self, data: dict[str, Any]) -> str:
         return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -403,7 +404,7 @@ class _StreamState:
             return ()
         self.think_open = False
         # Ensure a trailing newline after closing think block for better UI formatting
-        return self.iter_content_chunks("</think>\r\n")
+        return self.iter_content_chunks("</think>\n\n")
 
 
 async def _iter_sse_lines(byte_iter: AsyncIterator[bytes], *, max_buffer_bytes: int = 2 * 1024 * 1024) -> AsyncIterator[bytes]:
@@ -459,8 +460,19 @@ async def _translate_sse(upstream_iter: AsyncIterator[bytes], state: _StreamStat
             if isinstance(delta, str) and delta:
                 for chunk in state.open_think_if_needed():
                     yield chunk
-                for chunk in state.iter_content_chunks(delta):
-                    yield chunk
+                if et == "response.reasoning_summary_text.delta":
+                    state.summary_active = True
+                    for chunk in state.iter_content_chunks(delta):
+                        yield chunk
+                else:
+                    if state.summary_active:
+                        for chunk in state.iter_content_chunks("\r\n"):
+                            yield chunk
+                        state.summary_active = False
+                    for chunk in state.iter_content_chunks(delta):
+                        yield chunk
+                # for chunk in state.iter_content_chunks(delta):
+                #     yield chunk
             continue
 
         if et == "response.output_text.delta":
@@ -811,7 +823,7 @@ async def chat_completions(request: Request, payload: ChatCompletionsRequest) ->
                             d = d.get("text")
                         if isinstance(d, str) and d:
                             if think_open:
-                                content_buf.append("</think>\r\n")
+                                content_buf.append("</think>\n\n")
                                 think_open = False
                             content_buf.append(d)
                     elif t in ("response.output_item.added", "response.output_item.delta"):
@@ -872,7 +884,7 @@ async def chat_completions(request: Request, payload: ChatCompletionsRequest) ->
 
     # finalize assembled response
     if think_open:
-        content_buf.append("</think>\r\n")
+        content_buf.append("</think>\n\n")
     content = "".join(content_buf)
     tools_list = [tool_calls[k] for k in order]
     resp = _make_chat_response(payload, content, tools_list, usage_out)
