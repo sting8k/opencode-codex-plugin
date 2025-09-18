@@ -70,6 +70,19 @@ codex-proxy --host 127.0.0.1 --port 8111 --auth-path /path/to/your/auth.json
 
 With codex-proxy running, the OpenCode plugin will automatically register the available models. You can list them with the `/models` command in OpenCode. The models provided by this proxy will be prefixed with `Chatgpt`.
 
+### 3. Use as subagent
+
+To config as subagent in `opencode.json`, use `codex-proxy` as provider:
+```json
+"agent": {
+    "test-agent": {
+      "mode": "subagent",
+      "model": "codex-proxy/gpt-5-codex-low",
+      "prompt": "You will act as Joe Billy. A funny joking guy."
+    }
+}
+```
+
 ---
 
 ## Uninstall
