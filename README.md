@@ -26,19 +26,18 @@ The proxy needs an `auth.json` file to authenticate with Codex services.
 2.  This action will generate an `auth.json` file. By default, the proxy looks for this file at `~/.codex/auth.json`.
 3.  If your file is in a different location, you can specify the path when running the proxy (see Usage section).
 
-### Step 4: Install the OpenCode Plugin
+### Step 3: Install the OpenCode Plugin
 
 Download the plugin file to your OpenCode configuration directory:
 
 * Linux and Mac OS
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sting8k/opencode-codex-plugin/master/plugin_codexproxy.ts -o ~/.config/opencode/plugin/
+mkdir -p "$HOME/.config/opencode/plugin" && curl -fsSL "https://raw.githubusercontent.com/sting8k/opencode-codex-plugin/master/plugin_codexproxy.ts" -o "$HOME/.config/opencode/plugin/plugin_codexproxy.ts"
 ```
 
 * Windows
 ```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/sting8k/opencode-codex-plugin/master/plugin_codexproxy.ts -OutFile "$env:USERPROFILE\.config\opencode\plugin\plugin_codexproxy.ts"
-
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.config\opencode\plugin" > $null; Invoke-WebRequest 'https://raw.githubusercontent.com/sting8k/opencode-codex-plugin/master/plugin_codexproxy.ts' -OutFile "$env:USERPROFILE\.config\opencode\plugin\plugin_codexproxy.ts"
 ```
 
 ---
@@ -75,7 +74,7 @@ With codex-proxy running, the OpenCode plugin will automatically register the av
 
 ## Uninstall
 
-To remove completely, delete the plugin file and uninstall the pip package.
+To remove completely, delete the plugin file.
 
 ```bash
 rm -f ~/.config/opencode/plugin/plugin_codexproxy.ts
