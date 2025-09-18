@@ -1,61 +1,87 @@
-# Codex Proxy Plugin for [Opencode](https://github.com/sst/opencode)
+## Codex Proxy & Plugin for OpenCode
 
-An OpenCode plugin that wires the ChatGPT provider to a Codex-compatible proxy.
+This project connects [OpenCode](https://github.com/sst/opencode) to a Codex-compatible API.
 
-## Requirements
+It consists of two main parts:
+1.  **Proxy Server (`codex-proxy`)**: A Python-based proxy server that translates OpenAI-compatible requests into the format required by the Codex backend.
+2.  **OpenCode Plugin (`plugin_codexproxy.ts`)**: A plugin for OpenCode that directs the ChatGPT provider in OpenCode to use this local proxy.
 
-- Python 3.10 or newer
+---
 
-## Installation
+## Installation Guide
+
+### 1. Quick install codex-proxy as a cli tool
+### Step 1: Install the Proxy Server
 
 ```bash
-git clone https://github.com/sting8k/opencode-codex-plugin
-cd opencode-codex-plugin
-cp plugin_codexproxy.ts ~/.config/opencode/plugin/
-pip3 install .
+uvx --from git+https://github.com/sting8k/opencode-codex-plugin.git codex-proxy
+```
+This command will install `codex-proxy` into your virtual environment.
+
+### Step 2: Get Codex Credentials
+
+The proxy needs an `auth.json` file to authenticate with Codex services.
+
+1.  Sign in to Codex using either the Codex VS Code Extension or the Codex CLI.
+2.  This action will generate an `auth.json` file. By default, the proxy looks for this file at `~/.codex/auth.json`.
+3.  If your file is in a different location, you can specify the path when running the proxy (see Usage section).
+
+### Step 4: Install the OpenCode Plugin
+
+Download the plugin file to your OpenCode configuration directory:
+
+* Linux and Mac OS
+```bash
+curl -fsSL https://raw.githubusercontent.com/sting8k/opencode-codex-plugin/master/plugin_codexproxy.ts -o ~/.config/opencode/plugin/
 ```
 
-This exposes the `codex-proxy` CLI and Install plugin for opencode.
+* Windows
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/sting8k/opencode-codex-plugin/master/plugin_codexproxy.ts -OutFile "$env:USERPROFILE\.config\opencode\plugin\plugin_codexproxy.ts"
 
-### Usage
-1. Sign in to Codex via OAuth using the [Codex VS Code Extension](https://marketplace.visualstudio.com/items?itemName=openai.chatgpt) or the [Codex CLI](https://github.com/openai/codex) to generate auth.json.
+```
 
-2. Quick run:
+---
+
+## How to Use
+
+### 1. Run the Proxy
+
+Start the proxy server from your terminal:
 ```bash
 codex-proxy
+```
 
+You will see output similar to this, indicating the server is running:
+```
 ✓ Loaded configuration host=127.0.0.1 port=8111 auth_path=~/.codex/auth.json debug=disabled
 INFO:     Started server process [85563]
 INFO:     Waiting for application startup.
 Loaded authentication data from ~/.codex/auth.json
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8111 (Press CTRL+C to quit)
-INFO:     127.0.0.1:56709 - "POST /v1/chat/completions HTTP/1.1" 200 OK
 ```
 
-3. Or with custom host/port:
+To run on a different host or port, or with a custom `auth.json` path:
 ```bash
-codex-proxy --auth-path ~/.config/codex/auth.json --host 127.0.0.1 --port 8111
+codex-proxy --host 127.0.0.1 --port 8111 --auth-path /path/to/your/auth.json
 ```
 
-## Chatgpt provider plugin
+### 2. Use in OpenCode
 
-1. Ensure the proxy is running at `http://127.0.0.1:8111/v1/` or set `CHATGPT_CODEX_PROXY_BASE_URL` (`plugin_codexproxy.ts`) to your endpoint.
+With codex-proxy running, the OpenCode plugin will automatically register the available models. You can list them with the `/models` command in OpenCode. The models provided by this proxy will be prefixed with `Chatgpt`.
 
-2. The provider registers itself at startup; use the `/models` command to list them—the names are prefixed with `Chatgpt`.
-
-The plugin attempts to load available Codex models from `/v1/models` (from proxy) and falls back to the bundled `gpt-5` and `gpt-5-codex` entries when none are returned.
+---
 
 ## Uninstall
 
-To remove the package from your environment:
+To remove completely, delete the plugin file and uninstall the pip package.
+
 ```bash
 rm -f ~/.config/opencode/plugin/plugin_codexproxy.ts
-pip3 uninstall codex-proxy
 ```
 
 ## References
 
-- [ChatMock](https://github.com/RayBytes/ChatMock) — Codex-compatible mock proxy you can run while configuring the local service.
-- [just-every/code](https://github.com/just-every/code) — Reference implementation of Codex tooling that inspired this proxy integration.
-
+- [ChatMock](https://github.com/RayBytes/ChatMock) — A mock Codex-compatible proxy you can run while configuring the local service.
+- [just-every/code](https://github.com/just-every/code) — A reference implementation of Codex tooling that inspired this proxy integration.

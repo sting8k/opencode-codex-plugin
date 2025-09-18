@@ -12,7 +12,7 @@ import re
 import time
 import uuid
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Optional, Union
+from typing import Any, AsyncIterator, Callable, Iterable, Optional, Union
 
 from aiohttp import ClientError
 from fastapi import APIRouter, Request
@@ -66,6 +66,7 @@ MODELS_PAYLOAD = ModelsList(
 )
 
 # ---------- Helpers ----------
+
 
 def _normalize_model(model: str | None) -> tuple[str, dict[str, str] | None]:
     if not isinstance(model, str) or not model.strip():
@@ -266,6 +267,9 @@ def _make_debugger(request: Request) -> Optional[Callable[[str], None]]:
 # ---------- SSE translation ----------
 
 class _StreamState:
+    _SSE_EVENT_LIMIT_BYTES = 8 * 1024
+    _DELTA_BUDGET_BYTES = _SSE_EVENT_LIMIT_BYTES - 512  # leave room for JSON envelope overhead
+
     def __init__(self, response_id: str, model: str) -> None:
         self.response_id = response_id
         self.model = model
@@ -275,54 +279,108 @@ class _StreamState:
         self.args_buf: dict[str, str] = {}
         self.tool_order: list[str] = []
 
-    def _chunk(self, data: dict[str, Any]) -> str:
+    def _format_event(self, data: dict[str, Any]) -> str:
         return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
-    def content_chunk(self, text: str, finish: str | None = None) -> str:
-        if not text and finish is None:
-            return ""
-        data = {
-            "id": self.response_id,
-            "object": "chat.completion.chunk",
-            "created": self.created,
-            "model": self.model,
-            "choices": [{"index": 0, "delta": ({"content": text} if text else {}), "finish_reason": finish}],
-        }
-        return self._chunk(data)
+    def _chunk(self, data: dict[str, Any]) -> str:
+        return self._format_event(data)
 
-    def tool_chunk(self, idx: int, call_id: str, name: str, args_delta: str) -> str:
-        data = {
-            "id": self.response_id,
-            "object": "chat.completion.chunk",
-            "created": self.created,
-            "model": self.model,
-            "choices": [{
-                "index": 0,
-                "delta": {
-                    "tool_calls": [{
-                        "index": idx,
-                        "id": call_id,
-                        "type": "function",
-                        "function": {"name": name, "arguments": args_delta},
-                    }]
-                },
-                "finish_reason": None,
-            }],
-        }
-        return self._chunk(data)
+    def _split_for_budget(self, text: str) -> list[str]:
+        if not text:
+            return []
+        max_bytes = max(512, self._DELTA_BUDGET_BYTES)
+        parts: list[str] = []
+        buf: list[str] = []
+        buf_bytes = 0
+        for ch in text:
+            encoded = ch.encode("utf-8")
+            if buf and buf_bytes + len(encoded) > max_bytes:
+                parts.append("".join(buf))
+                buf = [ch]
+                buf_bytes = len(encoded)
+            else:
+                buf.append(ch)
+                buf_bytes += len(encoded)
+        if buf:
+            parts.append("".join(buf))
+        return parts
 
-    def open_think_if_needed(self) -> str:
+    def iter_content_chunks(self, text: str, finish: str | None = None) -> Iterable[str]:
+        segments = self._split_for_budget(text)
+        if not segments:
+            if finish is None:
+                return
+            segments = [""]
+        last_index = len(segments) - 1
+        for idx, segment in enumerate(segments):
+            delta = {"content": segment} if segment else {}
+            finish_reason = finish if finish is not None and idx == last_index else None
+            data = {
+                "id": self.response_id,
+                "object": "chat.completion.chunk",
+                "created": self.created,
+                "model": self.model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": delta,
+                        "finish_reason": finish_reason,
+                    }
+                ],
+            }
+            yield self._format_event(data)
+
+    def iter_tool_chunks(
+        self,
+        idx: int,
+        call_id: str,
+        name: str,
+        args_delta: str,
+        *,
+        finish: str | None = None,
+    ) -> Iterable[str]:
+        segments = self._split_for_budget(args_delta)
+        if not segments:
+            segments = [""]
+        last_index = len(segments) - 1
+        for seg_idx, segment in enumerate(segments):
+            finish_reason = finish if finish is not None and seg_idx == last_index else None
+            data = {
+                "id": self.response_id,
+                "object": "chat.completion.chunk",
+                "created": self.created,
+                "model": self.model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": idx,
+                                    "id": call_id,
+                                    "type": "function",
+                                    "function": {"name": name, "arguments": segment},
+                                }
+                            ]
+                        },
+                        "finish_reason": finish_reason,
+                    }
+                ],
+            }
+            yield self._format_event(data)
+
+    def open_think_if_needed(self) -> Iterable[str]:
         if self.think_open:
-            return ""
+            return ()
         self.think_open = True
-        return self.content_chunk("<think>")
+        return self.iter_content_chunks("<think>")
 
-    def close_think_if_open(self) -> str:
+    def close_think_if_open(self) -> Iterable[str]:
         if not self.think_open:
-            return ""
+            return ()
         self.think_open = False
         # Ensure a trailing newline after closing think block for better UI formatting
-        return self.content_chunk("</think>\r\n")
+        return self.iter_content_chunks("</think>\r\n")
 
 
 async def _translate_sse(upstream_iter: AsyncIterator[bytes], state: _StreamState, debug: Optional[Callable[[str], None]]):
@@ -352,8 +410,10 @@ async def _translate_sse(upstream_iter: AsyncIterator[bytes], state: _StreamStat
             if isinstance(delta, dict):
                 delta = delta.get("text")
             if isinstance(delta, str) and delta:
-                yield state.open_think_if_needed()
-                yield state.content_chunk(delta)
+                for chunk in state.open_think_if_needed():
+                    yield chunk
+                for chunk in state.iter_content_chunks(delta):
+                    yield chunk
             continue
 
         if et == "response.output_text.delta":
@@ -361,8 +421,10 @@ async def _translate_sse(upstream_iter: AsyncIterator[bytes], state: _StreamStat
             if isinstance(delta, dict):
                 delta = delta.get("text")
             if isinstance(delta, str) and delta:
-                yield state.close_think_if_open()
-                yield state.content_chunk(delta)
+                for chunk in state.close_think_if_open():
+                    yield chunk
+                for chunk in state.iter_content_chunks(delta):
+                    yield chunk
             continue
 
         if et in ("response.output_item.added", "response.output_item.delta"):
@@ -377,7 +439,8 @@ async def _translate_sse(upstream_iter: AsyncIterator[bytes], state: _StreamStat
                 idx = len(state.tool_order)
                 state.tool_order.append(item_id)
                 state.tool_map[item_id] = {"index": idx, "call_id": item_id, "name": name}
-                yield state.tool_chunk(idx, item_id, name, "")
+                for chunk in state.iter_tool_chunks(idx, item_id, name, ""):
+                    yield chunk
             args = item.get("arguments") or item.get("parameters") or ""
             if isinstance(args, dict):
                 args = json.dumps(args, ensure_ascii=False, separators=(",", ":"))
@@ -389,7 +452,8 @@ async def _translate_sse(upstream_iter: AsyncIterator[bytes], state: _StreamStat
                 state.args_buf[item_id] = prev + delta
                 if delta:
                     meta = state.tool_map[item_id]
-                    yield state.tool_chunk(meta["index"], meta["call_id"], meta["name"], delta)
+                    for chunk in state.iter_tool_chunks(meta["index"], meta["call_id"], meta["name"], delta):
+                        yield chunk
             continue
 
         if et == "response.function_call_arguments.delta":
@@ -401,56 +465,49 @@ async def _translate_sse(upstream_iter: AsyncIterator[bytes], state: _StreamStat
                     idx = len(state.tool_order)
                     state.tool_order.append(item_id)
                     state.tool_map[item_id] = meta = {"index": idx, "call_id": item_id, "name": ""}
-                    yield state.tool_chunk(idx, item_id, "", "")
+                    for chunk in state.iter_tool_chunks(idx, item_id, "", ""):
+                        yield chunk
                 prev = state.args_buf.get(item_id, "")
                 state.args_buf[item_id] = prev + delta
-                yield state.tool_chunk(meta["index"], meta["call_id"], meta["name"], delta)
+                for chunk in state.iter_tool_chunks(meta["index"], meta["call_id"], meta["name"], delta):
+                    yield chunk
             continue
 
         if et == "response.completed":
-            # Ensure think block is properly closed before finalization
-            yield state.close_think_if_open()
-            # emit final tool chunk with finish_reason if any tool was used
+            for chunk in state.close_think_if_open():
+                yield chunk
             if state.tool_order:
                 last_id = state.tool_order[-1]
                 meta = state.tool_map.get(last_id, {"index": 0, "call_id": last_id, "name": ""})
                 args_full = state.args_buf.get(last_id, "")
-                yield state._chunk({
-                    "id": state.response_id,
-                    "object": "chat.completion.chunk",
-                    "created": state.created,
-                    "model": state.model,
-                    "choices": [{
-                        "index": 0,
-                        "delta": {
-                            "tool_calls": [{
-                                "index": meta["index"],
-                                "id": meta["call_id"],
-                                "type": "function",
-                                "function": {"name": meta.get("name", ""), "arguments": args_full},
-                            }]
-                        },
-                        "finish_reason": "tool_calls",
-                    }],
-                })
+                for chunk in state.iter_tool_chunks(
+                    meta["index"],
+                    meta["call_id"],
+                    meta.get("name", ""),
+                    args_full,
+                    finish="tool_calls",
+                ):
+                    yield chunk
             else:
-                yield state.content_chunk("", finish="stop")
+                for chunk in state.iter_content_chunks("", finish="stop"):
+                    yield chunk
 
-            # usage chunk if available
             resp = ev.get("response") or {}
             usage = resp.get("usage") if isinstance(resp, dict) else None
             if isinstance(usage, dict):
                 pt = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
                 ct = int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
                 tt = int(usage.get("total_tokens") or (pt + ct))
-                yield state._chunk({
-                    "id": state.response_id,
-                    "object": "chat.completion.chunk",
-                    "created": state.created,
-                    "model": state.model,
-                    "usage": {"prompt_tokens": pt, "completion_tokens": ct, "total_tokens": tt},
-                    "choices": [],
-                })
+                yield state._chunk(
+                    {
+                        "id": state.response_id,
+                        "object": "chat.completion.chunk",
+                        "created": state.created,
+                        "model": state.model,
+                        "usage": {"prompt_tokens": pt, "completion_tokens": ct, "total_tokens": tt},
+                        "choices": [],
+                    }
+                )
             break
 
         if et == "response.failed":
@@ -458,7 +515,8 @@ async def _translate_sse(upstream_iter: AsyncIterator[bytes], state: _StreamStat
             err = ev.get("error")
             if isinstance(err, dict) and isinstance(err.get("message"), str):
                 msg = err["message"]
-            yield state.content_chunk(f"Error: {msg}", finish="stop")
+            for chunk in state.iter_content_chunks(f"Error: {msg}", finish="stop"):
+                yield chunk
             break
 
 
@@ -512,7 +570,8 @@ async def chat_completions(request: Request, payload: ChatCompletionsRequest) ->
                             txt = await r.text()
                             if debug_cb:
                                 debug_cb(f"upstream error body: {txt[:500]}")
-                            yield state.content_chunk(f"Error: Upstream {r.status}")
+                            for chunk in state.iter_content_chunks(f"Error: Upstream {r.status}"):
+                                yield chunk
                             yield "data: [DONE]\n\n"
                             return
                         # async for out in _translate_sse(r.content, state, debug_cb):
@@ -527,7 +586,8 @@ async def chat_completions(request: Request, payload: ChatCompletionsRequest) ->
                         txt = await r.text()
                         if debug_cb:
                             debug_cb(f"upstream error body: {txt[:500]}")
-                        yield state.content_chunk(f"Error: Upstream {r.status}")
+                        for chunk in state.iter_content_chunks(f"Error: Upstream {r.status}"):
+                            yield chunk
                         yield "data: [DONE]\n\n"
                         return
                     async for out in _translate_sse(r.content, state, debug_cb):
@@ -536,7 +596,8 @@ async def chat_completions(request: Request, payload: ChatCompletionsRequest) ->
             logger.error("Streaming error: %s", exc)
             if debug_cb:
                 debug_cb(f"streaming exception: {exc}")
-            yield state.content_chunk(f"Streaming error: {exc}", finish="stop")
+            for chunk in state.iter_content_chunks(f"Streaming error: {exc}", finish="stop"):
+                yield chunk
         yield "data: [DONE]\n\n"
 
     if getattr(payload, "stream", False):
