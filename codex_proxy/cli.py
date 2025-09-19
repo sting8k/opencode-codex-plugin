@@ -39,7 +39,7 @@ def _resolve_debug_settings(debug_arg: str | None, current_path: str | None) -> 
 def _build_settings(args: argparse.Namespace) -> ProxySettings:
     """Construct ProxySettings from CLI arguments with defaults."""
 
-    settings = ProxySettings.from_env()
+    settings = ProxySettings()
     settings.host = (args.host or DEFAULT_HOST)
     settings.port = (args.port or DEFAULT_PORT)
     settings.auth_path = (args.auth_path or DEFAULT_AUTH_PATH)

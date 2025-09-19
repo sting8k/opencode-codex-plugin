@@ -60,12 +60,12 @@ async def _read_auth_file(path: Path) -> dict[str, Any]:
 def create_app(settings: ProxySettings | None = None) -> FastAPI:
     """Build the FastAPI app with configured routers and lifespan hooks."""
 
-    settings = settings or ProxySettings.from_env()
+    settings = settings or ProxySettings()
 
     app = FastAPI(
         title="Codex OpenAI Proxy",
         description="FastAPI port of the Rust warp Codex proxy for OpenAI-compatible endpoints.",
-        version="0.1.4",
+        version="0.1.5",
     )
 
     app.include_router(router)

@@ -16,12 +16,6 @@ class ProxySettings:
     debug_sse_enabled: bool = False
     debug_sse_path: str | None = None
 
-    @classmethod
-    def from_env(cls) -> "ProxySettings":
-        """Construct settings using built-in defaults (CLI arguments may override)."""
-
-        return cls()
-
     def resolved_auth_path(self) -> Path:
         """Expand user and environment variables to obtain the auth file path."""
 
