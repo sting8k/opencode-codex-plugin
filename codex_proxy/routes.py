@@ -6,14 +6,14 @@ SSE debug logging for upstream responses.
 """
 from __future__ import annotations
 
-import asyncio
+import asyncio, aiohttp
 import json
 import logging, traceback
 import re
 import time
 import uuid
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Iterable, Optional, Union
+from typing import Any, AsyncContextManager, AsyncIterator, Awaitable, Callable, Iterable, Optional, Union
 
 from aiohttp import ClientError
 from fastapi import APIRouter, Request
@@ -33,6 +33,8 @@ router = APIRouter()
 
 # Upstream endpoint (ChatGPT Responses API)
 CHATGPT_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
+MAX_UPSTREAM_RETRIES = 2
+RETRY_BACKOFF_BASE = 0.5
 
 # Minimal model aliases and effort parsing
 _EFFORT_RE = re.compile(r"(?:[:_\-](minimal|low|medium|high))$", re.IGNORECASE)
@@ -284,7 +286,40 @@ def _make_debugger(request: Request) -> Optional[Callable[[str], None]]:
 
     return writer_log
 
+    
+def _should_retry(status: int) -> bool:
+    return status >= 500
 
+async def _sleep_with_backoff(attempt: int, debug: Optional[Callable[[str], None]]) -> None:
+    delay = RETRY_BACKOFF_BASE * (2 ** attempt)
+    logger.info("Retrying upstream request after %.2fs (attempt %d)", delay, attempt + 1)
+    if debug:
+        debug(f"retrying upstream request after {delay:.2f}s (attempt {attempt + 1})")
+    await asyncio.sleep(delay)
+    
+async def _run_with_retries(
+      handler: Callable[[int], Awaitable[bool]],
+      *,
+      reset: Optional[Callable[[], None]] = None,
+      debug: Optional[Callable[[str], None]] = None,
+  ) -> None:
+      last_exc: Exception | None = None
+      for attempt in range(MAX_UPSTREAM_RETRIES + 1):
+          if reset:
+              reset()
+          try:
+              if await handler(attempt):
+                  return
+              last_exc = None
+          except (asyncio.TimeoutError, ClientError) as exc:
+              last_exc = exc
+              logger.warning("Upstream attempt %d failed: %s", attempt + 1, exc)
+          if attempt < MAX_UPSTREAM_RETRIES:
+              await _sleep_with_backoff(attempt, debug)
+              continue
+          if last_exc:
+              raise last_exc
+          return
 # ---------- SSE translation ----------
 
 class _StreamState:
@@ -618,11 +653,31 @@ async def chat_completions(request: Request, payload: ChatCompletionsRequest) ->
     async def _stream() -> AsyncIterator[str]:
         response_id = f"chatcmpl-{uuid.uuid4()}"
         state = _StreamState(response_id, payload.model)
-        try:
-            if client is None:
-                import aiohttp
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=None, sock_read=None)) as s:
-                    async with s.post(CHATGPT_RESPONSES_URL, json=upstream_payload, headers=headers) as r:
+        for attempt in range(MAX_UPSTREAM_RETRIES + 1):
+            try:
+                if client is None:
+                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=None, sock_read=None)) as s:
+                        async with s.post(CHATGPT_RESPONSES_URL, json=upstream_payload, headers=headers) as r:
+                            if debug_cb:
+                                debug_cb(f"upstream status: {r.status}")
+                            if r.status >= 400:
+                                body = await r.text()
+                                if debug_cb:
+                                    debug_cb(f"upstream error body: {body[:500]}")
+                                detail = _extract_upstream_error(body) or f"Upstream {r.status}"
+                                if _should_retry(r.status) and attempt < MAX_UPSTREAM_RETRIES:
+                                    await _sleep_with_backoff(attempt, debug_cb)
+                                    continue
+                                for chunk in state.iter_content_chunks(f"Error: {detail}", finish="stop"):
+                                    yield chunk
+                                yield "data: [DONE]\n\n"
+                                return
+                            stream_iter = _iter_sse_lines(r.content.iter_chunked(1024))
+                            async for out in _translate_sse(stream_iter, state, debug_cb):
+                                yield out
+                            break
+                else:
+                    async with client.post(CHATGPT_RESPONSES_URL, json=upstream_payload, headers=headers) as r:
                         if debug_cb:
                             debug_cb(f"upstream status: {r.status}")
                         if r.status >= 400:
@@ -630,49 +685,31 @@ async def chat_completions(request: Request, payload: ChatCompletionsRequest) ->
                             if debug_cb:
                                 debug_cb(f"upstream error body: {body[:500]}")
                             detail = _extract_upstream_error(body) or f"Upstream {r.status}"
+                            if _should_retry(r.status) and attempt < MAX_UPSTREAM_RETRIES:
+                                await _sleep_with_backoff(attempt, debug_cb)
+                                continue
                             for chunk in state.iter_content_chunks(f"Error: {detail}", finish="stop"):
                                 yield chunk
                             yield "data: [DONE]\n\n"
                             return
-                        # async for out in _translate_sse(r.content, state, debug_cb):
-                        stream_iter = _iter_sse_lines(r.content.iter_chunked(1024))
+                        if hasattr(r, "aiter_raw"):
+                            stream_iter = _iter_sse_lines(r.aiter_raw())
+                        else:
+                            stream_iter = _iter_sse_lines(r.content.iter_chunked(1024))
                         async for out in _translate_sse(stream_iter, state, debug_cb):
                             yield out
-            else:
-                async with client.post(CHATGPT_RESPONSES_URL, json=upstream_payload, headers=headers) as r:
-                    if debug_cb:
-                        debug_cb(f"upstream status: {r.status}")
-                    if r.status >= 400:
-                        body = await r.text()
-                        if debug_cb:
-                            debug_cb(f"upstream error body: {body[:500]}")
-                        detail = _extract_upstream_error(body) or f"Upstream {r.status}"
-                        for chunk in state.iter_content_chunks(f"Error: {detail}", finish="stop"):
-                            yield chunk
-                        yield "data: [DONE]\n\n"
-                        return
-                    if hasattr(r, "aiter_raw"):
-                        stream_iter = _iter_sse_lines(r.aiter_raw())
-                    else:
-                        stream_iter = _iter_sse_lines(r.content.iter_chunked(1024))
-                    async for out in _translate_sse(stream_iter, state, debug_cb):
-                        yield out
-
-        except asyncio.TimeoutError as exc:
-            logger.error("Streaming timeout: %s", exc)
-            if debug_cb:
-                debug_cb("streaming timeout: upstream stalled")
-                debug_cb(traceback.format_exc())
-            for chunk in state.iter_content_chunks("Error: Upstream timed out while streaming", finish="stop"):
-                yield chunk
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Streaming error: %s", exc)
-            if debug_cb:
-                debug_cb(f"streaming exception: {exc}")
-                debug_cb(f"streaming exception class: {exc.__class__.__name__}")
-                debug_cb(traceback.format_exc())
-            for chunk in state.iter_content_chunks(f"Streaming error: {exc}", finish="stop"):
-                yield chunk
+                        break
+            except (asyncio.TimeoutError, ClientError) as exc:
+                if debug_cb:
+                    debug_cb(f"streaming exception: {exc}")
+                    debug_cb(traceback.format_exc())
+                if attempt < MAX_UPSTREAM_RETRIES:
+                    await _sleep_with_backoff(attempt, debug_cb)
+                    continue
+                for chunk in state.iter_content_chunks(f"Streaming error: {exc}", finish="stop"):
+                    yield chunk
+                yield "data: [DONE]\n\n"
+                return
         yield "data: [DONE]\n\n"
 
     if getattr(payload, "stream", False):
@@ -686,189 +723,223 @@ async def chat_completions(request: Request, payload: ChatCompletionsRequest) ->
     usage_out: dict[str, int] | None = None
 
     try:
-        if client is None:
-            import aiohttp
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=None, sock_read=None)) as s:
-                async with s.post(CHATGPT_RESPONSES_URL, json=upstream_payload, headers=headers) as r:
-                    if debug_cb:
-                        debug_cb(f"upstream status: {r.status}")
-                    if r.status >= 400:
-                        body = await r.text()
+        for attempt in range(MAX_UPSTREAM_RETRIES + 1):
+            content_buf.clear()
+            think_open = False
+            tool_calls.clear()
+            order.clear()
+            usage_out = None
+            try:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=None, sock_read=None)) as s:
+                    async with s.post(CHATGPT_RESPONSES_URL, json=upstream_payload, headers=headers) as r:
                         if debug_cb:
-                            debug_cb(f"upstream error body: {body[:500]}")
-                        detail = _extract_upstream_error(body) or f"Upstream {r.status}"
-                        raise ClientError(detail)
-                    async for raw in r.content:
-                        line = raw.decode("utf-8", errors="ignore").rstrip("\r\n")
-                        if debug_cb:
-                            debug_cb(f"raw: {line[:500]}")
-                        if not line.startswith("data: "):
-                            continue
-                        p = line[6:].strip()
-                        if p == "[DONE]":
+                            debug_cb(f"upstream status: {r.status}")
+                        if r.status >= 400:
+                            body = await r.text()
                             if debug_cb:
-                                debug_cb("event: [DONE]")
-                            break
-                        try:
-                            ev = json.loads(p)
-                        except json.JSONDecodeError:
+                                debug_cb(f"upstream error body: {body[:500]}")
+                            detail = _extract_upstream_error(body) or f"Upstream {r.status}"
+                            if _should_retry(r.status) and attempt < MAX_UPSTREAM_RETRIES:
+                                await _sleep_with_backoff(attempt, debug_cb)
+                                continue
+                            raise ClientError(detail)
+                        async for raw in r.content:
+                            line = raw.decode("utf-8", errors="ignore").rstrip("\r\n")
                             if debug_cb:
-                                debug_cb(f"event: parse_error {p[:200]}")
-                            continue
-                        t = ev.get("type")
-                        if debug_cb:
-                            debug_cb(f"event: {t or '<unknown>'} {p[:300]}")
-                        if t in ("response.reasoning_summary_text.delta", "response.reasoning_text.delta"):
-                            d = ev.get("delta")
-                            if isinstance(d, dict):
-                                d = d.get("text")
-                            if isinstance(d, str) and d:
-                                if not think_open:
-                                    content_buf.append("<think>")
-                                    think_open = True
-                                content_buf.append(d)
-                        elif t == "response.output_text.delta":
-                            d = ev.get("delta")
-                            if isinstance(d, dict):
-                                d = d.get("text")
-                            if isinstance(d, str) and d:
-                                if think_open:
-                                    content_buf.append("</think>\n\n")
-                                    think_open = False
-                                content_buf.append(d)
-                        elif t in ("response.output_item.added", "response.output_item.delta"):
-                            item = ev.get("item") or {}
-                            if isinstance(item, dict) and item.get("type") in ("function_call", "web_search_call"):
-                                item_id = item.get("id") or item.get("call_id") or f"call_{len(order)}"
-                                if item_id not in tool_calls:
-                                    order.append(item_id)
-                                    tool_calls[item_id] = {
-                                        "id": item_id,
-                                        "type": "function",
-                                        "function": {"name": item.get("name") or "", "arguments": ""},
-                                    }
-                                args = item.get("arguments") or item.get("parameters") or ""
-                                if isinstance(args, dict):
-                                    args = json.dumps(args, ensure_ascii=False, separators=(",", ":"))
-                                if isinstance(args, str):
-                                    tool_calls[item_id]["function"]["arguments"] = args
-                        elif t == "response.function_call_arguments.delta":
-                            item_id = ev.get("item_id")
-                            d = ev.get("delta") or ""
-                            if isinstance(item_id, str) and isinstance(d, str) and d:
-                                if item_id not in tool_calls:
-                                    order.append(item_id)
-                                    tool_calls[item_id] = {
-                                        "id": item_id,
-                                        "type": "function",
-                                        "function": {"name": "", "arguments": ""},
-                                    }
-                                tool_calls[item_id]["function"]["arguments"] += d
-                        elif t == "response.completed":
-                            resp = ev.get("response") or {}
-                            usage = resp.get("usage") if isinstance(resp, dict) else None
-                            if isinstance(usage, dict):
-                                pt = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
-                                ct = int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
-                                tt = int(usage.get("total_tokens") or (pt + ct))
-                                usage_out = {"prompt_tokens": pt, "completion_tokens": ct, "total_tokens": tt}
-                            break
-                        elif t == "response.failed":
-                            err = "Upstream failure"
-                            e = ev.get("error")
-                            if isinstance(e, dict) and isinstance(e.get("message"), str):
-                                err = e["message"]
-                            raise ClientError(err)
-        else:
-            async with client.post(CHATGPT_RESPONSES_URL, json=upstream_payload, headers=headers) as r:
+                                debug_cb(f"raw: {line[:500]}")
+                            if not line.startswith("data: "):
+                                continue
+                            p = line[6:].strip()
+                            if p == "[DONE]":
+                                if debug_cb:
+                                    debug_cb("event: [DONE]")
+                                break
+                            try:
+                                ev = json.loads(p)
+                            except json.JSONDecodeError:
+                                if debug_cb:
+                                    debug_cb(f"event: parse_error {p[:200]}")
+                                continue
+                            t = ev.get("type")
+                            if debug_cb:
+                                debug_cb(f"event: {t or '<unknown>'} {p[:300]}")
+                            if t in ("response.reasoning_summary_text.delta", "response.reasoning_text.delta"):
+                                d = ev.get("delta")
+                                if isinstance(d, dict):
+                                    d = d.get("text")
+                                if isinstance(d, str) and d:
+                                    if not think_open:
+                                        content_buf.append("<think>")
+                                        think_open = True
+                                    content_buf.append(d)
+                            elif t == "response.output_text.delta":
+                                d = ev.get("delta")
+                                if isinstance(d, dict):
+                                    d = d.get("text")
+                                if isinstance(d, str) and d:
+                                    if think_open:
+                                        content_buf.append("</think>\n\n")
+                                        think_open = False
+                                    content_buf.append(d)
+                            elif t in ("response.output_item.added", "response.output_item.delta"):
+                                item = ev.get("item") or {}
+                                if isinstance(item, dict) and item.get("type") in ("function_call", "web_search_call"):
+                                    item_id = item.get("id") or item.get("call_id") or f"call_{len(order)}"
+                                    if item_id not in tool_calls:
+                                        order.append(item_id)
+                                        tool_calls[item_id] = {
+                                            "id": item_id,
+                                            "type": "function",
+                                            "function": {"name": item.get("name") or "", "arguments": ""},
+                                        }
+                                    args = item.get("arguments") or item.get("parameters") or ""
+                                    if isinstance(args, dict):
+                                        args = json.dumps(args, ensure_ascii=False, separators=(",", ":"))
+                                    if isinstance(args, str):
+                                        tool_calls[item_id]["function"]["arguments"] = args
+                            elif t == "response.function_call_arguments.delta":
+                                item_id = ev.get("item_id")
+                                d = ev.get("delta") or ""
+                                if isinstance(item_id, str) and isinstance(d, str) and d:
+                                    if item_id not in tool_calls:
+                                        order.append(item_id)
+                                        tool_calls[item_id] = {
+                                            "id": item_id,
+                                            "type": "function",
+                                            "function": {"name": "", "arguments": ""},
+                                        }
+                                    tool_calls[item_id]["function"]["arguments"] += d
+                            elif t == "response.completed":
+                                resp = ev.get("response") or {}
+                                usage = resp.get("usage") if isinstance(resp, dict) else None
+                                if isinstance(usage, dict):
+                                    pt = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
+                                    ct = int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
+                                    tt = int(usage.get("total_tokens") or (pt + ct))
+                                    usage_out = {"prompt_tokens": pt, "completion_tokens": ct, "total_tokens": tt}
+                                break
+                            elif t == "response.failed":
+                                err = "Upstream failure"
+                                e = ev.get("error")
+                                if isinstance(e, dict) and isinstance(e.get("message"), str):
+                                    err = e["message"]
+                                raise ClientError(err)
+            except (asyncio.TimeoutError, ClientError) as exc:
                 if debug_cb:
-                    debug_cb(f"upstream status: {r.status}")
-                if r.status >= 400:
-                    body = await r.text()
-                    if debug_cb:
-                        debug_cb(f"upstream error body: {body[:500]}")
-                    raise ClientError(f"Upstream {r.status}: {body[:200]}")
-                async for raw in r.content:
-                    line = raw.decode("utf-8", errors="ignore").rstrip("\r\n")
-                    if debug_cb:
-                        debug_cb(f"raw: {line[:500]}")
-                    if not line.startswith("data: "):
-                        continue
-                    p = line[6:].strip()
-                    if p == "[DONE]":
+                    debug_cb(f"non-stream exception: {exc}")
+                if attempt < MAX_UPSTREAM_RETRIES:
+                    await _sleep_with_backoff(attempt, debug_cb)
+                    continue
+                raise
+        else:
+            for attempt in range(MAX_UPSTREAM_RETRIES + 1):
+                content_buf.clear()
+                think_open = False
+                tool_calls.clear()
+                order.clear()
+                usage_out = None
+                try:
+                    async with client.post(CHATGPT_RESPONSES_URL, json=upstream_payload, headers=headers) as r:
                         if debug_cb:
-                            debug_cb("event: [DONE]")
-                        break
-                    try:
-                        ev = json.loads(p)
-                    except json.JSONDecodeError:
-                        if debug_cb:
-                            debug_cb(f"event: parse_error {p[:200]}")
-                        continue
-                    t = ev.get("type")
+                            debug_cb(f"upstream status: {r.status}")
+                        if r.status >= 400:
+                            body = await r.text()
+                            if debug_cb:
+                                debug_cb(f"upstream error body: {body[:500]}")
+                            detail = _extract_upstream_error(body) or f"Upstream {r.status}"
+                            if _should_retry(r.status) and attempt < MAX_UPSTREAM_RETRIES:
+                                await _sleep_with_backoff(attempt, debug_cb)
+                                continue
+                            raise ClientError(detail)
+                        async for raw in r.content:
+                            line = raw.decode("utf-8", errors="ignore").rstrip("\r\n")
+                            if debug_cb:
+                                debug_cb(f"raw: {line[:500]}")
+                            if not line.startswith("data: "):
+                                continue
+                            p = line[6:].strip()
+                            if p == "[DONE]":
+                                if debug_cb:
+                                    debug_cb("event: [DONE]")
+                                break
+                            try:
+                                ev = json.loads(p)
+                            except json.JSONDecodeError:
+                                if debug_cb:
+                                    debug_cb(f"event: parse_error {p[:200]}")
+                                continue
+                            t = ev.get("type")
+                            if debug_cb:
+                                debug_cb(f"event: {t or '<unknown>'} {p[:300]}")
+                            if t in ("response.reasoning_summary_text.delta", "response.reasoning_text.delta"):
+                                d = ev.get("delta")
+                                if isinstance(d, dict):
+                                    d = d.get("text")
+                                if isinstance(d, str) and d:
+                                    if not think_open:
+                                        content_buf.append("<think>")
+                                        think_open = True
+                                    content_buf.append(d)
+                            elif t == "response.output_text.delta":
+                                d = ev.get("delta")
+                                if isinstance(d, dict):
+                                    d = d.get("text")
+                                if isinstance(d, str) and d:
+                                    if think_open:
+                                        content_buf.append("</think>\n\n")
+                                        think_open = False
+                                    content_buf.append(d)
+                            elif t in ("response.output_item.added", "response.output_item.delta"):
+                                item = ev.get("item") or {}
+                                if isinstance(item, dict) and item.get("type") in ("function_call", "web_search_call"):
+                                    item_id = item.get("id") or item.get("call_id") or f"call_{len(order)}"
+                                    if item_id not in tool_calls:
+                                        order.append(item_id)
+                                        tool_calls[item_id] = {
+                                            "id": item_id,
+                                            "type": "function",
+                                            "function": {"name": item.get("name") or "", "arguments": ""},
+                                        }
+                                    args = item.get("arguments") or item.get("parameters") or ""
+                                    if isinstance(args, dict):
+                                        args = json.dumps(args, ensure_ascii=False, separators=(",", ":"))
+                                    if isinstance(args, str):
+                                        tool_calls[item_id]["function"]["arguments"] = args
+                            elif t == "response.function_call_arguments.delta":
+                                item_id = ev.get("item_id")
+                                d = ev.get("delta") or ""
+                                if isinstance(item_id, str) and isinstance(d, str) and d:
+                                    if item_id not in tool_calls:
+                                        order.append(item_id)
+                                        tool_calls[item_id] = {
+                                            "id": item_id,
+                                            "type": "function",
+                                            "function": {"name": "", "arguments": ""},
+                                        }
+                                    tool_calls[item_id]["function"]["arguments"] += d
+                            elif t == "response.completed":
+                                resp = ev.get("response") or {}
+                                usage = resp.get("usage") if isinstance(resp, dict) else None
+                                if isinstance(usage, dict):
+                                    pt = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
+                                    ct = int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
+                                    tt = int(usage.get("total_tokens") or (pt + ct))
+                                    usage_out = {"prompt_tokens": pt, "completion_tokens": ct, "total_tokens": tt}
+                                break
+                            elif t == "response.failed":
+                                err = "Upstream failure"
+                                e = ev.get("error")
+                                if isinstance(e, dict) and isinstance(e.get("message"), str):
+                                    err = e["message"]
+                                raise ClientError(err)
+                    break
+                except (asyncio.TimeoutError, ClientError) as exc:
                     if debug_cb:
-                        debug_cb(f"event: {t or '<unknown>'} {p[:300]}")
-                    if t in ("response.reasoning_summary_text.delta", "response.reasoning_text.delta"):
-                        d = ev.get("delta")
-                        if isinstance(d, dict):
-                            d = d.get("text")
-                        if isinstance(d, str) and d:
-                            if not think_open:
-                                content_buf.append("<think>")
-                                think_open = True
-                            content_buf.append(d)
-                    elif t == "response.output_text.delta":
-                        d = ev.get("delta")
-                        if isinstance(d, dict):
-                            d = d.get("text")
-                        if isinstance(d, str) and d:
-                            if think_open:
-                                content_buf.append("</think>\n\n")
-                                think_open = False
-                            content_buf.append(d)
-                    elif t in ("response.output_item.added", "response.output_item.delta"):
-                        item = ev.get("item") or {}
-                        if isinstance(item, dict) and item.get("type") in ("function_call", "web_search_call"):
-                            item_id = item.get("id") or item.get("call_id") or f"call_{len(order)}"
-                            if item_id not in tool_calls:
-                                order.append(item_id)
-                                tool_calls[item_id] = {
-                                    "id": item_id,
-                                    "type": "function",
-                                    "function": {"name": item.get("name") or "", "arguments": ""},
-                                }
-                            args = item.get("arguments") or item.get("parameters") or ""
-                            if isinstance(args, dict):
-                                args = json.dumps(args, ensure_ascii=False, separators=(",", ":"))
-                            if isinstance(args, str):
-                                tool_calls[item_id]["function"]["arguments"] = args
-                    elif t == "response.function_call_arguments.delta":
-                        item_id = ev.get("item_id")
-                        d = ev.get("delta") or ""
-                        if isinstance(item_id, str) and isinstance(d, str) and d:
-                            if item_id not in tool_calls:
-                                order.append(item_id)
-                                tool_calls[item_id] = {
-                                    "id": item_id,
-                                    "type": "function",
-                                    "function": {"name": "", "arguments": ""},
-                                }
-                            tool_calls[item_id]["function"]["arguments"] += d
-                    elif t == "response.completed":
-                        resp = ev.get("response") or {}
-                        usage = resp.get("usage") if isinstance(resp, dict) else None
-                        if isinstance(usage, dict):
-                            pt = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
-                            ct = int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
-                            tt = int(usage.get("total_tokens") or (pt + ct))
-                            usage_out = {"prompt_tokens": pt, "completion_tokens": ct, "total_tokens": tt}
-                        break
-                    elif t == "response.failed":
-                        err = "Upstream failure"
-                        e = ev.get("error")
-                        if isinstance(e, dict) and isinstance(e.get("message"), str):
-                            err = e["message"]
-                        raise ClientError(err)
+                        debug_cb(f"non-stream exception: {exc}")
+                    if attempt < MAX_UPSTREAM_RETRIES:
+                        await _sleep_with_backoff(attempt, debug_cb)
+                        continue
+                    raise
     except ClientError as exc:
         logger.warning("Falling back stub due to upstream error: %s", exc)
         if debug_cb:
