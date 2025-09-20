@@ -15,7 +15,7 @@ class ProxySettings:
     auth_path: str | None = None
     debug_sse_enabled: bool = False
     debug_sse_path: str | None = None
-    streaming_mode: str = "auto"
+    streaming_mode: bool = True
 
     def resolved_auth_path(self) -> Path:
         """Expand user and environment variables to obtain the auth file path."""

@@ -694,12 +694,9 @@ async def chat_completions(request: Request, payload: ChatCompletionsRequest) ->
         yield "data: [DONE]\n\n"
 
     streaming_setting = getattr(request.app.state, "settings", None)
-    streaming_mode = getattr(streaming_setting, "streaming_mode", "auto")
-    use_streaming = True
-    if streaming_mode == "disable":
-        use_streaming = False
+    streaming_mode = getattr(streaming_setting, "streaming_mode", True)
         
-    if use_streaming:
+    if streaming_mode:
         return StreamingResponse(_stream(), media_type="text/event-stream", headers={"Access-Control-Allow-Origin": "*"})
 
     # Non-streaming: buffer the stream and assemble a final response

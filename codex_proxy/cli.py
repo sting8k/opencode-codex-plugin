@@ -99,10 +99,11 @@ def parse_args() -> argparse.Namespace:
         help="Enable SSE debug logging and write to PATH",
     )
     parser.add_argument(
-        "--stream",
-        choices=["auto", "disable"],
-        default="auto",
-        help="Streaming behavior: auto (respect client), force (always stream), disable (never stream)",
+        "--no-stream",
+        action="store_false",
+        dest="stream",
+        default=True,
+        help="Disable streaming (default: enabled)",
     )
     return parser.parse_args()
 
