@@ -223,23 +223,23 @@ def _build_headers(request: Request) -> dict[str, str]:
         "Origin": "https://chatgpt.com",
         "Referer": "https://chatgpt.com/",
     }
-    auth = request.headers.get("authorization") or request.headers.get("Authorization")
-    if auth:
-        headers["Authorization"] = auth
-    else:
-        auth_data = getattr(request.app.state, "auth_data", None)
-        if isinstance(auth_data, dict):
-            tokens = auth_data.get("tokens") or {}
-            access_token = tokens.get("access_token")
-            if access_token:
-                headers["Authorization"] = f"Bearer {access_token}"
-            account_id = tokens.get("account_id")
-            if account_id:
-                headers["chatgpt-account-id"] = account_id
-            if not access_token:
-                api_key = auth_data.get("OPENAI_API_KEY") or auth_data.get("api_key")
-                if api_key:
-                    headers["Authorization"] = f"Bearer {api_key}"
+    # auth = request.headers.get("authorization") or request.headers.get("Authorization")
+    # if auth:
+    #     headers["Authorization"] = auth
+    # else:
+    auth_data = getattr(request.app.state, "auth_data", None)
+    if isinstance(auth_data, dict):
+        tokens = auth_data.get("tokens") or {}
+        access_token = tokens.get("access_token")
+        if access_token:
+            headers["Authorization"] = f"Bearer {access_token}"
+        account_id = tokens.get("account_id")
+        if account_id:
+            headers["chatgpt-account-id"] = account_id
+        if not access_token:
+            api_key = auth_data.get("OPENAI_API_KEY") or auth_data.get("api_key")
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
     return headers
 
 
