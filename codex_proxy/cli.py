@@ -43,6 +43,7 @@ def _build_settings(args: argparse.Namespace) -> ProxySettings:
     settings.host = (args.host or DEFAULT_HOST)
     settings.port = (args.port or DEFAULT_PORT)
     settings.auth_path = (args.auth_path or DEFAULT_AUTH_PATH)
+    settings.streaming_mode = getattr(args, "stream", True)
 
     debug_enabled, debug_path = _resolve_debug_settings(getattr(args, "debug", None), settings.debug_sse_path)
     settings.debug_sse_enabled = debug_enabled
@@ -63,11 +64,12 @@ def _log_configuration(settings: ProxySettings) -> None:
 
     logger.info("Initializing Codex OpenAI Proxy ...")
     logger.info(
-        "✓ Loaded configuration host=%s port=%s auth_path=%s debug=%s",
+        "✓ Loaded configuration host=%s port=%s auth_path=%s debug=%s stream=%s",
         settings.host,
         settings.port,
         auth_display,
         debug_display,
+        settings.streaming_mode
     )
 
 
@@ -95,6 +97,12 @@ def parse_args() -> argparse.Namespace:
         metavar="PATH",
         default=None,
         help="Enable SSE debug logging and write to PATH",
+    )
+    parser.add_argument(
+        "--stream",
+        choices=["auto", "disable"],
+        default="auto",
+        help="Streaming behavior: auto (respect client), force (always stream), disable (never stream)",
     )
     return parser.parse_args()
 
