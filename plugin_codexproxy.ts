@@ -59,9 +59,19 @@ async function fetchCodexProxyModels(baseURL: string): Promise<AvailableModels> 
     }
 
     codexProxyModelCache.set(cacheKey, models);
+    console.log("✅ Codex proxy models fetched successfully!");
     return models;
-  } catch (error) {
-    console.warn("Failed to fetch models from Codex proxy, using fallback:", error);
+  }  catch (error) {
+    let errMessage = 'unknown error';
+    if (error instanceof Error) {
+      errMessage = error.message;
+    } else if (typeof error === 'string') {
+      errMessage = error;
+    } else if (error && typeof error === 'object' && 'code' in error) {
+      errMessage = (error as any).code || 'connection error';
+    }
+
+    console.warn("[!] Failed to fetch models from Codex proxy at %s (reason: %s). Using fallback.", modelsEndpoint, errMessage);
     const fallback = buildCodexProxyModels();
     codexProxyModelCache.set(cacheKey, fallback);
     return fallback;
@@ -154,7 +164,7 @@ async function configureChatGptProviders(config: any) {
       const baseURL = process.env.CHATGPT_CODEX_PROXY_BASE_URL || DEFAULT_CODEX_PROXY_BASE_URL;
       const codexProxyModels = await getCodexProxyModels(baseURL);
       config.provider[CODEX_PROXY_PROVIDER_NAME] = buildCodexProxyProvider(baseURL, codexProxyModels);
-      console.log("✅ ChatGPT Codex proxy provider ready");
+      // console.log("✅ ChatGPT Codex proxy provider ready");
     }
   }
 }
