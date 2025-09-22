@@ -320,6 +320,13 @@ def _yield_error_response(state: _StreamState, message: str) -> Iterator[str]:
         yield chunk
     yield "data: [DONE]\n\n"
     
+class _UpstreamStreamError(RuntimeError):
+    """Raised when upstream SSE stream emits a terminal failure event."""
+
+    def __init__(self, message: str, *, event: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.event = event or {}
+    
 async def _get_stream_iterator(response: aiohttp.ClientResponse) -> AsyncIterator[bytes]:
     """Get appropriate stream iterator based on response capabilities."""
     if hasattr(response, "aiter_raw"):
@@ -611,13 +618,14 @@ async def _translate_sse(upstream_iter: AsyncIterator[bytes], state: _StreamStat
             break
 
         if et == "response.failed":
-            msg = "Upstream failure"
-            err = ev.get("error")
-            if isinstance(err, dict) and isinstance(err.get("message"), str):
-                msg = err["message"]
-            for chunk in state.iter_content_chunks(f"Error: {msg}", finish="stop"):
-                yield chunk
-            break
+            err = "Upstream failure"
+            err_obj = ev.get("error")
+            if isinstance(err_obj, dict) and isinstance(err_obj.get("message"), str):
+                err = err_obj["message"]
+            raise _UpstreamStreamError(err, event=ev)
+            # for chunk in state.iter_content_chunks(f"Error: {msg}", finish="stop"):
+            #     yield chunk
+            # break
 
 
 # ---------- Routes ----------
@@ -681,6 +689,15 @@ async def chat_completions(request: Request, payload: ChatCompletionsRequest) ->
                     async for out in _translate_sse(stream_iter, state, debug_cb):
                         yield out
                     break
+            except _UpstreamStreamError as exc:
+                if debug_cb:
+                    debug_cb(f"streaming upstream failure: {exc}")
+                if attempt < MAX_UPSTREAM_RETRIES:
+                    await _sleep_with_backoff(attempt, debug_cb)
+                    continue
+                for chunk in _yield_error_response(state, f"Upstream stream failed: {exc}"):
+                    yield chunk
+                return
             except (asyncio.TimeoutError, ClientError) as exc:
                 if debug_cb:
                     debug_cb(f"streaming exception: {exc}")
@@ -808,8 +825,16 @@ async def chat_completions(request: Request, payload: ChatCompletionsRequest) ->
                             e = ev.get("error")
                             if isinstance(e, dict) and isinstance(e.get("message"), str):
                                 err = e["message"]
-                            raise ClientError(err)
+                            raise _UpstreamStreamError(err, event=ev)
+                            # raise ClientError(err)
                 break
+            except _UpstreamStreamError as exc:
+                if debug_cb:
+                    debug_cb(f"non-stream upstream failure: {exc}")
+                if attempt < MAX_UPSTREAM_RETRIES:
+                    await _sleep_with_backoff(attempt, debug_cb)
+                    continue
+                raise
             except (asyncio.TimeoutError, ClientError) as exc:
                 if debug_cb:
                     debug_cb(f"non-stream exception: {exc}")
@@ -817,7 +842,7 @@ async def chat_completions(request: Request, payload: ChatCompletionsRequest) ->
                     await _sleep_with_backoff(attempt, debug_cb)
                     continue
                 raise
-    except ClientError as exc:
+    except (_UpstreamStreamError, ClientError) as exc:
         logger.warning("Falling back stub due to upstream error: %s", exc)
         if debug_cb:
             debug_cb(f"non-stream exception: {exc}")
