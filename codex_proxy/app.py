@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Any, Optional
 
 from aiohttp import ClientSession
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 from .config import ProxySettings
 from .routes import router
@@ -65,7 +67,7 @@ def create_app(settings: ProxySettings | None = None) -> FastAPI:
     app = FastAPI(
         title="Codex OpenAI Proxy",
         description="FastAPI port of the Rust warp Codex proxy for OpenAI-compatible endpoints.",
-        version="0.1.9",
+        version="0.1.10",
     )
 
     app.include_router(router)
@@ -73,6 +75,31 @@ def create_app(settings: ProxySettings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.http_client = None
     app.state.auth_data = None
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        """Log detailed validation errors for debugging 422 issues"""
+        body = None
+        try:
+            body = await request.body()
+            body_str = body.decode('utf-8')
+        except Exception:
+            body_str = "<unable to read body>"
+        
+        logger.error(
+            "Validation Error [422] on %s %s\n"
+            "Body: %s\n"
+            "Errors: %s",
+            request.method,
+            request.url.path,
+            body_str[:500],
+            exc.errors()
+        )
+        
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"detail": exc.errors()},
+        )
 
     @app.on_event("startup")
     async def on_startup() -> None:  # pragma: no cover - exercised at runtime

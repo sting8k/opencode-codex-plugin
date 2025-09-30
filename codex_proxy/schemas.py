@@ -12,7 +12,7 @@ class ChatMessage(BaseModel):
 
 class ChatCompletionsRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="allow")
-    model: str
+    model: Optional[str] = "gpt-5"  # Default to gpt-5 if not provided
     messages: List[ChatMessage]
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
