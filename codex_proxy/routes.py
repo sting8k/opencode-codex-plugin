@@ -32,6 +32,51 @@ from .schemas import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+
+def _coerce_json_object_from_bytes(raw: bytes) -> dict[str, Any]:
+    """Parse request body bytes into a JSON object, handling double-encoded strings.
+    
+    Raises:
+        ValueError: If body is empty or resolves to empty string
+        TypeError: If parsed result is not a JSON object (dict)
+        json.JSONDecodeError: If JSON parsing fails
+    """
+    if not raw or raw.strip() == b"":
+        raise ValueError("Empty request body")
+    
+    # Decode once; tolerate bad bytes for diagnostics
+    text = raw.decode("utf-8", errors="replace").strip()
+    
+    # First parse with fallback for incorrectly escaped outer quotes (e.g., \"{...}\")
+    try:
+        first = json.loads(text)
+    except json.JSONDecodeError as e1:
+        # Fallback: if starts with \" and ends with \", strip the backslashes on OUTER quotes only
+        if text.startswith('\\"') and text.endswith('\\"') and len(text) >= 4:
+            try:
+                patched = '"' + text[2:-2] + '"'
+                first = json.loads(patched)
+            except json.JSONDecodeError:
+                raise e1
+        else:
+            raise e1
+    
+    # Handle double-encoded JSON: payload is a JSON string that itself contains JSON
+    if isinstance(first, str):
+        inner = first.strip()
+        if not inner:
+            raise ValueError("Body resolves to an empty string after decoding")
+        second = json.loads(inner)
+        if not isinstance(second, dict):
+            raise TypeError("Decoded payload is not a JSON object")
+        return second
+    
+    if not isinstance(first, dict):
+        raise TypeError("Request body must be a JSON object")
+    
+    return first
+
+
 # Upstream endpoint (ChatGPT Responses API)
 CHATGPT_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
 MAX_UPSTREAM_RETRIES = 2
@@ -643,7 +688,25 @@ async def models(_: Request) -> Union[JSONResponse, Response]:
 
 @router.post("/chat/completions", response_model=None)
 @router.post("/v1/chat/completions", response_model=None)
-async def chat_completions(request: Request, payload: ChatCompletionsRequest) -> Union[JSONResponse, Response, StreamingResponse]:
+async def chat_completions(request: Request) -> Union[JSONResponse, Response, StreamingResponse]:
+    try:
+        payload_dict = _coerce_json_object_from_bytes(await request.body())
+        payload = ChatCompletionsRequest(**payload_dict)
+    except json.JSONDecodeError as e:
+        logger.error("Failed to parse JSON: %s", e)
+        return JSONResponse(
+            status_code=422,
+            content={"error": {"message": f"Invalid JSON: {e.msg} at pos {e.pos}"}},
+            headers={"Access-Control-Allow-Origin": "*"},
+        )
+    except (TypeError, ValueError) as e:
+        logger.error("Invalid request body: %s", e)
+        return JSONResponse(
+            status_code=422,
+            content={"error": {"message": str(e)}},
+            headers={"Access-Control-Allow-Origin": "*"},
+        )
+    
     headers = _build_headers(request)
     debug_cb = _make_debugger(request)
 

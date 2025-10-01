@@ -6,14 +6,15 @@ from pydantic import BaseModel, Field, ConfigDict
 
 
 class ChatMessage(BaseModel):
+    model_config = ConfigDict(extra="allow")
     role: str
     content: Any
 
 
 class ChatCompletionsRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True, extra="allow")
+    model_config = ConfigDict(populate_by_name=True, extra="allow", arbitrary_types_allowed=True)
     model: Optional[str] = "gpt-5"  # Default to gpt-5 if not provided
-    messages: List[ChatMessage]
+    messages: List[Any]  # Changed to Any to be more flexible
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
     stream: Optional[bool] = None

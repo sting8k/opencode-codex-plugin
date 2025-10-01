@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 from aiohttp import ClientSession
 from fastapi import FastAPI, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -16,6 +17,41 @@ from .config import ProxySettings
 from .routes import router
 
 logger = logging.getLogger(__name__)
+
+
+def _json_safe(obj: Any) -> Any:
+    """Sanitize objects to be JSON-serializable, converting bytes to UTF-8 strings."""
+    try:
+        return jsonable_encoder(
+            obj,
+            exclude_none=True,
+            custom_encoder={
+                bytes: lambda b: b.decode("utf-8", errors="replace"),
+            },
+        )
+    except Exception:
+        # Fallback: manual sanitizer
+        def walk(x: Any) -> Any:
+            if isinstance(x, bytes):
+                return x.decode("utf-8", errors="replace")
+            if isinstance(x, dict):
+                return {walk(k): walk(v) for k, v in x.items()}
+            if isinstance(x, (list, tuple, set)):
+                return [walk(i) for i in x]
+            if isinstance(x, (str, int, float, bool)) or x is None:
+                return x
+            # Handle Path and other misc types
+            try:
+                from pathlib import Path
+                if isinstance(x, Path):
+                    return str(x)
+            except Exception:
+                pass
+            try:
+                return str(x)
+            except Exception:
+                return "<unserializable>"
+        return walk(obj)
 
 class AuthConfigError(RuntimeError):
     """Raised when the auth.json file is missing or invalid."""
@@ -67,7 +103,7 @@ def create_app(settings: ProxySettings | None = None) -> FastAPI:
     app = FastAPI(
         title="Codex OpenAI Proxy",
         description="FastAPI port of the Rust warp Codex proxy for OpenAI-compatible endpoints.",
-        version="0.1.10",
+        version="0.1.11",
     )
 
     app.include_router(router)
@@ -79,26 +115,27 @@ def create_app(settings: ProxySettings | None = None) -> FastAPI:
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
         """Log detailed validation errors for debugging 422 issues"""
-        body = None
         try:
-            body = await request.body()
-            body_str = body.decode('utf-8')
+            raw = await request.body()
+            body_preview = raw.decode("utf-8", errors="replace")[:500]
         except Exception:
-            body_str = "<unable to read body>"
+            body_preview = "<unable to read body>"
+        
+        # Sanitize errors before logging and returning
+        detail = _json_safe(exc.errors())
         
         logger.error(
-            "Validation Error [422] on %s %s\n"
-            "Body: %s\n"
-            "Errors: %s",
+            "Validation Error [422] %s %s\nBody: %s\nErrors: %s",
             request.method,
             request.url.path,
-            body_str[:500],
-            exc.errors()
+            body_preview,
+            detail,
         )
         
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content={"detail": exc.errors()},
+            content={"detail": detail},
+            headers={"Access-Control-Allow-Origin": "*"},
         )
 
     @app.on_event("startup")
