@@ -1,6 +1,5 @@
 """Entry points for launching the FastAPI proxy via uvicorn."""
 from __future__ import annotations
-from .app import AuthConfigError, _read_auth_file, create_app
 import argparse
 import asyncio
 import logging
@@ -8,7 +7,11 @@ import os
 
 import uvicorn
 
-from .app import create_app
+# Configure logging BEFORE importing app modules so _load_default_instructions() logs are visible
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+logger = logging.getLogger(__name__)
+
+from .app import AuthConfigError, _read_auth_file, create_app
 from .config import ProxySettings
 
 
@@ -18,10 +21,6 @@ DEFAULT_DEBUG_PATH = "/tmp/debug_codexproxy.log"
 DEFAULT_AUTH_PATH = "~/.codex/auth.json"
 if os.name == "nt":
     DEFAULT_AUTH_PATH = r"%USERPROFILE%\\.codex\\auth.json"
-
-
-logging.basicConfig(level=logging.INFO, format="%(message)s")
-logger = logging.getLogger(__name__)
 
 
 def _resolve_debug_settings(debug_arg: str | None, current_path: str | None) -> tuple[bool, str]:

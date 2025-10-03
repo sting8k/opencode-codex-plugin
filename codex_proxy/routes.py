@@ -114,16 +114,86 @@ MODELS_PAYLOAD = ModelsList(
 # ---------- Helpers ----------
 
 def _load_default_instructions() -> str:
-    prompt_path = Path(__file__).parent / "prompt.md"
+    """Load GPT-5 Codex prompt with caching fallback strategy.
+    
+    Strategy:
+    1. Check project-relative cache (.cache/gpt_5_prompt.md)
+    2. If stale/missing, fetch from GitHub
+    3. If GitHub fails, use bundled prompt.md as fallback
+    
+    Cache TTL: 24 hours (configurable via CODEX_PROMPT_CACHE_TTL_HOURS env var)
+    """
+    import os
+    
+    GITHUB_PROMPT_URL = "https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/gpt_5_codex_prompt.md"
+    CACHE_TTL_HOURS = int(os.getenv("CODEX_PROMPT_CACHE_TTL_HOURS", "24"))
+    
+    cache_dir = Path(__file__).parent / ".cache"
+    cache_file = cache_dir / "gpt_5_prompt.md"
+    cache_meta = cache_dir / "gpt_5_prompt.meta"
+    bundled_prompt = Path(__file__).parent / "prompt.md"
+    
+    # Helper: check if cache is fresh
+    def is_cache_fresh() -> bool:
+        if not cache_file.exists() or not cache_meta.exists():
+            return False
+        try:
+            timestamp = float(cache_meta.read_text().strip())
+            age_hours = (time.time() - timestamp) / 3600
+            return age_hours < CACHE_TTL_HOURS
+        except (OSError, ValueError):
+            return False
+    
+    # Helper: fetch from GitHub
+    def fetch_from_github() -> str | None:
+        try:
+            import urllib.request
+            print("✓ Fetching GPT-5 prompt from GitHub: https://github.com/openai/codex")
+            with urllib.request.urlopen(GITHUB_PROMPT_URL, timeout=10) as response:
+                if response.status == 200:
+                    content = response.read().decode("utf-8")
+                    # Save to cache
+                    cache_dir.mkdir(parents=True, exist_ok=True)
+                    cache_file.write_text(content, encoding="utf-8")
+                    cache_meta.write_text(str(time.time()), encoding="utf-8")
+                    print("✓ Cached GPT-5 prompt from GitHub")
+                    return content
+        except Exception as exc:
+            logger.warning("Failed to fetch prompt from GitHub: %s", exc)
+        return None
+    
+    # Strategy: cache → GitHub → bundled fallback
+    if is_cache_fresh():
+        try:
+            print("✓ Using cached GPT-5 prompt")
+            return cache_file.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Failed to read cached prompt: %s", exc)
+    
+    # Try fetching from GitHub
+    github_content = fetch_from_github()
+    if github_content:
+        return github_content
+    
+    # Fallback to bundled prompt.md
     try:
-        return prompt_path.read_text(encoding="utf-8")
+        print("✓ Using bundled prompt.md as fallback")
+        return bundled_prompt.read_text(encoding="utf-8")
     except OSError as exc:
         raise RuntimeError(
-            f"Failed to read prompt instructions at {prompt_path}: {exc}"
+            f"Failed to load prompt from all sources (cache, GitHub, bundled): {exc}"
         ) from exc
 
 
-_DEFAULT_INSTRUCTIONS = _load_default_instructions()
+_DEFAULT_INSTRUCTIONS: str | None = None
+
+
+def _get_default_instructions() -> str:
+    """Lazy-load instructions on first use (after logging is configured)."""
+    global _DEFAULT_INSTRUCTIONS
+    if _DEFAULT_INSTRUCTIONS is None:
+        _DEFAULT_INSTRUCTIONS = _load_default_instructions()
+    return _DEFAULT_INSTRUCTIONS
 
 
 def _normalize_model(model: str | None) -> tuple[str, dict[str, str] | None]:
@@ -244,7 +314,7 @@ def _build_upstream_payload(req: ChatCompletionsRequest) -> dict[str, Any]:
     model, reasoning = _normalize_model(req.model)
     payload: dict[str, Any] = {
         "model": model,
-        "instructions": _DEFAULT_INSTRUCTIONS,
+        "instructions": _get_default_instructions(),
         "input": _messages_to_input(req.messages),
         "tools": _sanitize_tools(getattr(req, "tools", None)),
         "tool_choice": getattr(req, "tool_choice", None) or "auto",
