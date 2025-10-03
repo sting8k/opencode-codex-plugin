@@ -59,7 +59,7 @@ async function fetchCodexProxyModels(baseURL: string): Promise<AvailableModels> 
     }
 
     codexProxyModelCache.set(cacheKey, models);
-    console.log("✅ Codex proxy models fetched successfully!");
+    console.warn("✅ Codex proxy models fetched successfully!");
     return models;
   }  catch (error) {
     let errMessage = 'unknown error';
@@ -164,7 +164,6 @@ async function configureChatGptProviders(config: any) {
       const baseURL = process.env.CHATGPT_CODEX_PROXY_BASE_URL || DEFAULT_CODEX_PROXY_BASE_URL;
       const codexProxyModels = await getCodexProxyModels(baseURL);
       config.provider[CODEX_PROXY_PROVIDER_NAME] = buildCodexProxyProvider(baseURL, codexProxyModels);
-      // console.log("✅ ChatGPT Codex proxy provider ready");
     }
   }
 }
