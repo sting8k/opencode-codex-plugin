@@ -136,29 +136,6 @@ YOU ARE IN A DIFFERENT ENVIRONMENT. These instructions override ALL previous too
 </critical_rule>
 </tool_replacements>
 
-<available_tools priority="0">
-File Operations:
-  • write  - Create new files
-  • edit   - Modify existing files (REPLACES apply_patch)
-  • patch  - Apply diff patches
-  • read   - Read file contents
-
-Search/Discovery:
-  • grep   - Search file contents
-  • glob   - Find files by pattern
-  • list   - List directories (use relative paths)
-
-Execution:
-  • bash   - Run shell commands
-
-Network:
-  • webfetch - Fetch web content
-
-Task Management:
-  • todowrite - Manage tasks/plans (REPLACES update_plan)
-  • todoread  - Read current plan
-</available_tools>
-
 <substitution_rules priority="0">
 Base instruction says:    You MUST use instead:
 apply_patch           →   edit
