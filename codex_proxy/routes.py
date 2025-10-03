@@ -121,72 +121,60 @@ YOU ARE IN A DIFFERENT ENVIRONMENT. These instructions override ALL previous too
 
 <tool_replacements priority="0">
 <critical_rule priority="0">
-❌ APPLY_PATCH DOES NOT EXIST → ✅ USE "Edit" INSTEAD
+❌ APPLY_PATCH DOES NOT EXIST → ✅ USE "edit" INSTEAD
 - NEVER use: apply_patch, applyPatch
-- ALWAYS use: Edit tool for ALL file modifications
-- Before modifying files: Verify you're using "Edit", NOT "apply_patch"
+- ALWAYS use: edit tool for ALL file modifications
+- Before modifying files: Verify you're using "edit", NOT "apply_patch"
 </critical_rule>
 
 <critical_rule priority="0">
-❌ UPDATE_PLAN DOES NOT EXIST → ✅ USE "TodoWrite" INSTEAD
+❌ UPDATE_PLAN DOES NOT EXIST → ✅ USE "todowrite" INSTEAD
 - NEVER use: update_plan, updatePlan
-- ALWAYS use: TodoWrite for ALL task/plan operations
-- Before plan operations: Verify you're using "TodoWrite", NOT "update_plan"
-</critical_rule>
-
-<critical_rule priority="0">
-❌ SHELL DOES NOT EXIST → ✅ USE "Execute" INSTEAD
-- NEVER use: shell, bash (as tool names)
-- ALWAYS use: Execute tool for ALL shell commands
-- Before running commands: Verify you're using "Execute", NOT "shell"
+- ALWAYS use: todowrite for ALL task/plan operations
+- Use todoread to read current plan
+- Before plan operations: Verify you're using "todowrite", NOT "update_plan"
 </critical_rule>
 </tool_replacements>
 
 <available_tools priority="0">
 File Operations:
-  • Create  - Create new files
-  • Edit    - Modify existing files (REPLACES apply_patch)
-  • MultiEdit - Edit multiple parts of a file at once
-  • Read    - Read file contents
-  • Delete  - Delete files
+  • write  - Create new files
+  • edit   - Modify existing files (REPLACES apply_patch)
+  • patch  - Apply diff patches
+  • read   - Read file contents
 
 Search/Discovery:
-  • Grep    - Search file contents
-  • Glob    - Find files by pattern
-  • LS      - List directories
+  • grep   - Search file contents
+  • glob   - Find files by pattern
+  • list   - List directories (use relative paths)
 
 Execution:
-  • Execute - Run shell commands (REPLACES shell)
+  • bash   - Run shell commands
 
 Network:
-  • FetchUrl - Fetch web content
-  • WebSearch - Search the web
+  • webfetch - Fetch web content
 
 Task Management:
-  • TodoWrite - Manage tasks/plans (REPLACES update_plan)
-
-Code Intelligence:
-  • mcp-router___search_code - Search code semantically
-  • mcp-router___extract_code - Extract code blocks
+  • todowrite - Manage tasks/plans (REPLACES update_plan)
+  • todoread  - Read current plan
 </available_tools>
 
 <substitution_rules priority="0">
 Base instruction says:    You MUST use instead:
-apply_patch           →   Edit
-applyPatch            →   Edit
-update_plan           →   TodoWrite
-updatePlan            →   TodoWrite
-shell                 →   Execute
-bash (as tool)        →   Execute
-read_plan             →   (TodoWrite can read current state)
+apply_patch           →   edit
+applyPatch            →   edit
+update_plan           →   todowrite
+updatePlan            →   todowrite
+read_plan             →   todoread
+absolute paths        →   relative paths
 </substitution_rules>
 
 <verification_checklist priority="0">
-Before file/plan/command operations:
-1. Am I using "Edit" NOT "apply_patch"?
-2. Am I using "TodoWrite" NOT "update_plan"?
-3. Am I using "Execute" NOT "shell"?
-4. Is this tool in the approved list above?
+Before file/plan modifications:
+1. Am I using "edit" NOT "apply_patch"?
+2. Am I using "todowrite" NOT "update_plan"?
+3. Is this tool in the approved list above?
+4. Am I using relative paths?
 
 If ANY answer is NO → STOP and correct before proceeding.
 </verification_checklist>
