@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codex-proxy"
-version = "0.1.12"
+version = "0.1.13"
 description = "FastAPI proxy translating OpenAI Chat Completions into ChatGPT-style SSE responses."
 readme = "README.md"
 requires-python = ">=3.10"

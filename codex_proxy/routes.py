@@ -91,6 +91,9 @@ _MODEL_ALIAS = {
     "gpt5-codex": "gpt-5-codex",
     "gpt-5-codex": "gpt-5-codex",
     "gpt-5-codex-latest": "gpt-5-codex",
+    "gpt5-codex-mini": "gpt-5-codex-mini",
+    "gpt-5-codex-mini": "gpt-5-codex-mini",
+    "gpt-5-codex-mini-latest": "gpt-5-codex-mini",
     "codex": "codex-mini-latest",
     "codex-mini": "codex-mini-latest",
     "codex-mini-latest": "codex-mini-latest",
@@ -108,6 +111,9 @@ MODELS_PAYLOAD = ModelsList(
         {"id": "gpt-5-codex-high", "object": "model", "owned_by": "owner"},
         {"id": "gpt-5-codex-medium", "object": "model", "owned_by": "owner"},
         {"id": "gpt-5-codex-low", "object": "model", "owned_by": "owner"},
+        {"id": "gpt-5-codex-mini", "object": "model", "owned_by": "owner"},
+        {"id": "gpt-5-codex-mini-high", "object": "model", "owned_by": "owner"},
+        {"id": "gpt-5-codex-mini-medium", "object": "model", "owned_by": "owner"},
     ]
 )
 
