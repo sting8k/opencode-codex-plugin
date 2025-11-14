@@ -93,8 +93,10 @@ function normalizeCodexProxyBaseURL(baseURL: string): string {
 }
 
 const CODEX_PROXY_BASE_MODELS: Record<string, string> = {
-  "gpt-5": "ChatGPT GPT-5",
-  "gpt-5-codex": "ChatGPT GPT-5 Codex",
+  // "gpt-5": "ChatGPT GPT-5",
+  "gpt-5.1": "ChatGPT GPT-5.1",
+  // "gpt-5-codex": "ChatGPT GPT-5 Codex",
+  "gpt-5.1-codex": "ChatGPT GPT-5.1 Codex",
   "gpt-5-codex-mini": "ChatGPT GPT-5 Codex Mini",
 };
 
