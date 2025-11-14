@@ -160,7 +160,6 @@ applyPatch            →   edit
 update_plan           →   todowrite
 updatePlan            →   todowrite
 read_plan             →   todoread
-absolute paths        →   relative paths
 </substitution_rules>
 
 <verification_checklist priority="0">
@@ -168,7 +167,6 @@ Before file/plan modifications:
 1. Am I using "edit" NOT "apply_patch"?
 2. Am I using "todowrite" NOT "update_plan"?
 3. Is this tool in the approved list above?
-4. Am I using relative paths?
 
 If ANY answer is NO → STOP and correct before proceeding.
 </verification_checklist>
