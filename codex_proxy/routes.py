@@ -85,21 +85,21 @@ RETRY_BACKOFF_BASE = 0.5
 # Minimal model aliases and effort parsing
 _EFFORT_RE = re.compile(r"(?:[:_\-](minimal|low|medium|high))$", re.IGNORECASE)
 _MODEL_ALIAS = {
-    "gpt5": "gpt-5",
-    "gpt-5": "gpt-5",
+    "gpt5": "gpt-5.1",
+    "gpt-5": "gpt-5.1",
     "gpt-5-latest": "gpt-5.1",
     "gpt5.1": "gpt-5.1",
     "gpt-5.1": "gpt-5.1",
     "gpt-5.1-latest": "gpt-5.1",
-    "gpt5-codex": "gpt-5-codex",
-    "gpt-5-codex": "gpt-5-codex",
-    "gpt-5-codex-latest": "gpt-5-codex",
+    "gpt5-codex": "gpt-5.1-codex",
+    "gpt-5-codex": "gpt-5.1-codex",
+    "gpt-5-codex-latest": "gpt-5.1-codex",
     "gpt5.1-codex": "gpt-5.1-codex",
     "gpt-5.1-codex": "gpt-5.1-codex",
     "gpt-5.1-codex-latest": "gpt-5.1-codex",
-    "gpt5-codex-mini": "gpt-5-codex-mini",
-    "gpt-5-codex-mini": "gpt-5-codex-mini",
-    "gpt-5-codex-mini-latest": "gpt-5-codex-mini"
+    "gpt5-codex-mini": "gpt-5.1-codex-mini",
+    "gpt-5-codex-mini": "gpt-5.1-codex-mini",
+    "gpt-5-codex-mini-latest": "gpt-5.1-codex-mini"
 }
 
 # Fixed models payload (unchanged IDs)
@@ -122,9 +122,9 @@ MODELS_PAYLOAD = ModelsList(
         {"id": "gpt-5.1-codex-high", "object": "model", "owned_by": "owner"},
         {"id": "gpt-5.1-codex-medium", "object": "model", "owned_by": "owner"},
         {"id": "gpt-5.1-codex-low", "object": "model", "owned_by": "owner"},
-        {"id": "gpt-5-codex-mini", "object": "model", "owned_by": "owner"},
-        {"id": "gpt-5-codex-mini-high", "object": "model", "owned_by": "owner"},
-        {"id": "gpt-5-codex-mini-medium", "object": "model", "owned_by": "owner"},
+        {"id": "gpt-5.1-codex-mini", "object": "model", "owned_by": "owner"},
+        {"id": "gpt-5.1-codex-mini-high", "object": "model", "owned_by": "owner"},
+        {"id": "gpt-5.1-codex-mini-medium", "object": "model", "owned_by": "owner"},
     ]
 )
 
