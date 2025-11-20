@@ -1,0 +1,19 @@
+services:
+  codex-proxy:
+    image: codex-proxy:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: codex-proxy
+    ports:
+      - "8111:8111"
+    volumes:
+      # Mount your auth.json file here
+      - ~/.codex/auth.json:/home/codexuser/.codex/auth.json:ro
+    environment:
+      # Override default settings via environment variables
+      - PROXY_HOST=0.0.0.0
+      - PROXY_PORT=8111
+    restart: unless-stopped
+    command: "codex-proxy --host 0.0.0.0"
+

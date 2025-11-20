@@ -83,7 +83,7 @@ MAX_UPSTREAM_RETRIES = 2
 RETRY_BACKOFF_BASE = 0.5
 
 # Minimal model aliases and effort parsing
-_EFFORT_RE = re.compile(r"(?:[:_\-](minimal|low|medium|high))$", re.IGNORECASE)
+_EFFORT_RE = re.compile(r"(?:[:_\-](minimal|low|medium|high|xhigh))$", re.IGNORECASE)
 _MODEL_ALIAS = {
     "gpt5": "gpt-5.1",
     "gpt-5": "gpt-5.1",
@@ -94,6 +94,8 @@ _MODEL_ALIAS = {
     "gpt5-codex": "gpt-5.1-codex",
     "gpt-5-codex": "gpt-5.1-codex",
     "gpt-5-codex-latest": "gpt-5.1-codex",
+    "gpt-5.1-codex-max": "gpt-5.1-codex-max",
+    "gpt5.1-codex-max": "gpt-5.1-codex-max",
     "gpt5.1-codex": "gpt-5.1-codex",
     "gpt-5.1-codex": "gpt-5.1-codex",
     "gpt-5.1-codex-latest": "gpt-5.1-codex",
@@ -110,18 +112,27 @@ MODELS_PAYLOAD = ModelsList(
         # {"id": "gpt-5-medium", "object": "model", "owned_by": "owner"},
         # {"id": "gpt-5-low", "object": "model", "owned_by": "owner"},
         # {"id": "gpt-5-minimal", "object": "model", "owned_by": "owner"},
+
+        # GPT 5.1 models
         {"id": "gpt-5.1", "object": "model", "owned_by": "owner"},
         {"id": "gpt-5.1-high", "object": "model", "owned_by": "owner"},
         {"id": "gpt-5.1-medium", "object": "model", "owned_by": "owner"},
         {"id": "gpt-5.1-low", "object": "model", "owned_by": "owner"},
-        # {"id": "gpt-5-codex", "object": "model", "owned_by": "owner"},
-        # {"id": "gpt-5-codex-high", "object": "model", "owned_by": "owner"},
-        # {"id": "gpt-5-codex-medium", "object": "model", "owned_by": "owner"},
-        # {"id": "gpt-5-codex-low", "object": "model", "owned_by": "owner"},
+        
+        # GPT 5.1 codex models
         {"id": "gpt-5.1-codex", "object": "model", "owned_by": "owner"},
         {"id": "gpt-5.1-codex-high", "object": "model", "owned_by": "owner"},
         {"id": "gpt-5.1-codex-medium", "object": "model", "owned_by": "owner"},
         {"id": "gpt-5.1-codex-low", "object": "model", "owned_by": "owner"},
+
+        # GPT 5.1 codex max models
+        {"id": "gpt-5.1-codex-max", "object": "model", "owned_by": "owner"},
+        {"id": "gpt-5.1-codex-max-xhigh", "object": "model", "owned_by": "owner"},
+        {"id": "gpt-5.1-codex-max-high", "object": "model", "owned_by": "owner"},
+        {"id": "gpt-5.1-codex-max-medium", "object": "model", "owned_by": "owner"},
+        {"id": "gpt-5.1-codex-max-low", "object": "model", "owned_by": "owner"},
+
+        # GPT 5.1 codex mini models
         {"id": "gpt-5.1-codex-mini", "object": "model", "owned_by": "owner"},
         {"id": "gpt-5.1-codex-mini-high", "object": "model", "owned_by": "owner"},
         {"id": "gpt-5.1-codex-mini-medium", "object": "model", "owned_by": "owner"},

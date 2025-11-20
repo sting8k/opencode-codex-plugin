@@ -95,12 +95,12 @@ function normalizeCodexProxyBaseURL(baseURL: string): string {
 const CODEX_PROXY_BASE_MODELS: Record<string, string> = {
   // "gpt-5": "ChatGPT GPT-5",
   "gpt-5.1": "ChatGPT GPT-5.1",
-  // "gpt-5-codex": "ChatGPT GPT-5 Codex",
   "gpt-5.1-codex": "ChatGPT GPT-5.1 Codex",
-  "gpt-5-codex-mini": "ChatGPT GPT-5 Codex Mini",
+  "gpt-5.1-codex-max": "ChatGPT GPT-5.1 Codex Max",
+  "gpt-5.1-codex-mini": "ChatGPT GPT-5.1 Codex Mini",
 };
 
-const CODEX_PROXY_VARIANT_SUFFIXES = new Set(["minimal", "low", "medium", "high"]);
+const CODEX_PROXY_VARIANT_SUFFIXES = new Set(["minimal", "low", "medium", "high", "xhigh"]);
 
 function deriveCodexProxyModelName(modelId: string): string {
   if (CODEX_PROXY_BASE_MODELS[modelId]) {
@@ -113,7 +113,7 @@ function deriveCodexProxyModelName(modelId: string): string {
     if (CODEX_PROXY_VARIANT_SUFFIXES.has(variant)) {
       const baseId = parts.slice(0, -1).join("-");
       const baseName = CODEX_PROXY_BASE_MODELS[baseId] || baseId;
-      return `${baseName} (${variant})`;
+      return `${baseName} (${variant != "xhigh" ? variant : "extra high"})`;
     }
   }
 
